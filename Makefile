@@ -18,7 +18,7 @@ INCLUDES := -Ikernel -Ilibs/libk
 
 KERNEL_CPP := $(shell find kernel libs/libk shell -name "*.cpp")
 KERNEL_C   := $(shell find kernel libs/libk -name "*.c")
-KERNEL_ASM := $(shell find kernel -name "*.asm")
+KERNEL_ASM := $(shell find kernel -name "*.asm" | grep -v multiboot.asm)
 
 OBJS := $(patsubst %.cpp, $(BUILD_DIR)/%.o, $(KERNEL_CPP))
 OBJS += $(patsubst %.c,   $(BUILD_DIR)/%.o, $(KERNEL_C))
