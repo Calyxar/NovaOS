@@ -10,3 +10,7 @@ namespace Keyboard {
     bool key_pressed(uint8_t scancode);
     void handle_irq();
 }
+
+// F1 key press flag — set when F1 is pressed, cleared after reading
+extern bool f1_pressed;
+

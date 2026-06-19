@@ -3,103 +3,88 @@
 static Mouse::State state = { 400, 300, false, false, false };
 static int32_t max_x = 800;
 static int32_t max_y = 600;
-static uint8_t mouse_cycle = 0;
-static int8_t  mouse_buf[3];
+static uint8_t packet[3];
+static uint8_t packet_idx = 0;
 
-static uint8_t inb(uint16_t port) {
-    uint8_t val;
-    asm volatile("inb %1, %0" : "=a"(val) : "Nd"(port));
-    return val;
+static inline uint8_t inb(uint16_t port) {
+    uint8_t v;
+    asm volatile("inb %1, %0" : "=a"(v) : "Nd"(port));
+    return v;
+}
+static inline void outb(uint16_t port, uint8_t v) {
+    asm volatile("outb %0, %1" : : "a"(v), "Nd"(port));
 }
 
-static void outb(uint16_t port, uint8_t val) {
-    asm volatile("outb %0, %1" : : "a"(val), "Nd"(port));
-}
+static void wait_in()  { uint32_t t=100000; while(t-- && !(inb(0x64)&1)); }
+static void wait_out() { uint32_t t=100000; while(t-- && (inb(0x64)&2)); }
 
-static void mouse_wait(uint8_t type) {
-    uint32_t timeout = 100000;
-    if (type == 0) {
-        while (timeout--) if (inb(0x64) & 1) return;
-    } else {
-        while (timeout--) if (!(inb(0x64) & 2)) return;
-    }
-}
-
-static void mouse_write(uint8_t data) {
-    mouse_wait(1);
-    outb(0x64, 0xD4);
-    mouse_wait(1);
-    outb(0x60, data);
-}
-
-static uint8_t mouse_read() {
-    mouse_wait(0);
-    return inb(0x60);
-}
+static void mwrite(uint8_t d) { wait_out(); outb(0x64,0xD4); wait_out(); outb(0x60,d); }
+static uint8_t mread() { wait_in(); return inb(0x60); }
 
 void Mouse::init() {
-    state.x = max_x / 2;
-    state.y = max_y / 2;
-    state.left = state.right = state.middle = false;
-    mouse_cycle = 0;
+    state.x = max_x/2; state.y = max_y/2;
+    packet_idx = 0;
 
-    // Enable auxiliary mouse device
-    mouse_wait(1); outb(0x64, 0xA8);
+    wait_out(); outb(0x64, 0xA8);          // enable aux device
+    wait_out(); outb(0x64, 0x20);          // read config byte
+    uint8_t cfg = mread();
+    cfg |= 0x02;                            // enable IRQ12
+    cfg &= ~0x20;                           // enable mouse clock
+    wait_out(); outb(0x64, 0x60);
+    wait_out(); outb(0x60, cfg);
 
-    // Enable interrupts
-    mouse_wait(1); outb(0x64, 0x20);
-    mouse_wait(0);
-    uint8_t status = inb(0x60) | 2;
-    mouse_wait(1); outb(0x64, 0x60);
-    mouse_wait(1); outb(0x60, status);
-
-    // Set defaults
-    mouse_write(0xF6);
-    mouse_read();
-
-    // Enable data reporting
-    mouse_write(0xF4);
-    mouse_read();
+    mwrite(0xFF); mread(); mread(); mread(); // reset, ack, id, id
+    mwrite(0xF6); mread();                   // set defaults
+    mwrite(0xF4); mread();                   // enable streaming
 }
 
+// Each call processes exactly one raw byte from the controller.
+// Resyncs aggressively: byte0 must have bit3=1 and bits6-7=0.
 void Mouse::handle_irq() {
     uint8_t data = inb(0x60);
-    mouse_buf[mouse_cycle++] = (int8_t)data;
 
-    if (mouse_cycle == 3) {
-        mouse_cycle = 0;
+    if (packet_idx == 0) {
+        if ((data & 0x08) == 0 || (data & 0xC0) != 0) {
+            return; // not a valid start byte — drop, stay synced at 0
+        }
+    }
 
-        // Byte 0: buttons + flags
-        uint8_t flags = (uint8_t)mouse_buf[0];
-        state.left   = flags & 0x01;
-        state.right  = flags & 0x02;
-        state.middle = flags & 0x04;
+    packet[packet_idx++] = data;
+    if (packet_idx < 3) return;
+    packet_idx = 0;
 
-        // Bytes 1,2: X,Y delta (signed)
-        int8_t dx = mouse_buf[1];
-        int8_t dy = mouse_buf[2];
+    uint8_t flags = packet[0];
+    state.left   = (flags & 0x01) != 0;
+    state.right  = (flags & 0x02) != 0;
+    state.middle = (flags & 0x04) != 0;
 
-        // Y is inverted in PS/2
+    int dx = packet[1];
+    int dy = packet[2];
+    if (flags & 0x10) dx -= 256;
+    if (flags & 0x20) dy -= 256;
+
+    // Reject implausibly large single-step jumps (likely desync garbage)
+    if (dx > -120 && dx < 120 && dy > -120 && dy < 120) {
         state.x += dx;
         state.y -= dy;
-
-        // Clamp to screen bounds
-        if (state.x < 0)     state.x = 0;
-        if (state.y < 0)     state.y = 0;
+        if (state.x < 0) state.x = 0;
+        if (state.y < 0) state.y = 0;
         if (state.x >= max_x) state.x = max_x - 1;
         if (state.y >= max_y) state.y = max_y - 1;
     }
 }
 
-
 void Mouse::poll() {
-    uint8_t status = inb(0x64);
-    if ((status & 0x21) == 0x21) {
-        handle_irq();
+    for (int guard = 0; guard < 64; guard++) {
+        uint8_t status = inb(0x64);
+        if (!(status & 0x01)) break;
+        if (status & 0x20) {
+            handle_irq();
+        } else {
+            inb(0x60); // discard non-mouse byte
+        }
     }
 }
-Mouse::State& Mouse::get_state() { return state; }
 
-void Mouse::set_bounds(int32_t mx, int32_t my) {
-    max_x = mx; max_y = my;
-}
+Mouse::State& Mouse::get_state() { return state; }
+void Mouse::set_bounds(int32_t mx, int32_t my) { max_x = mx; max_y = my; }

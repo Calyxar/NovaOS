@@ -5,6 +5,7 @@ int  kb_head = 0;
 int  kb_tail = 0;
 
 static bool shift_held   = false;
+bool f1_pressed = false;
 static bool caps_lock    = false;
 
 // Unshifted scancode map
@@ -52,6 +53,7 @@ static const char scancode_shift[128] = {
 #define SC_LEFT_SHIFT  0x2A
 #define SC_RIGHT_SHIFT 0x36
 #define SC_CAPS_LOCK   0x3A
+#define SC_F1          0x3B
 #define SC_KEY_RELEASE 0x80
 
 static uint8_t inb(uint16_t port) {
@@ -82,6 +84,9 @@ void Keyboard::handle_irq() {
         shift_held = true;
         return;
     }
+
+    // F1 = simulate click
+    if (scancode == SC_F1) { f1_pressed = true; return; }
 
     // Caps Lock toggle
     if (scancode == SC_CAPS_LOCK) {

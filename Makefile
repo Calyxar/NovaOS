@@ -69,7 +69,7 @@ iso: kernel
 	@echo "  [ISO] $(ISO_FILE)"
 
 run: iso
-	qemu-system-i386 -cdrom $(ISO_FILE) -m 256M
+	qemu-system-i386 -cdrom $(ISO_FILE) -m 256M -display sdl,show-cursor=on
 
 run-kvm: iso
 	qemu-system-x86_64 -cdrom $(ISO_FILE) -m 512M -enable-kvm -cpu host -smp 4
