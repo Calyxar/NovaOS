@@ -162,6 +162,7 @@ static void draw_topbar() {
     Framebuffer::draw_circle(16,18,3,CLR_CYAN);
     Framebuffer::draw_circle(16,18,1,CLR_WHITE);
     Framebuffer::print_at("NovaOS",28,14,CLR_CYAN);
+    Framebuffer::print_at("[1-8: nav]",420,14,CLR_DIM);
     Framebuffer::print_at("Home",110,14,CLR_WHITE);
     Framebuffer::print_at("Files",155,14,CLR_DIM);
     Framebuffer::print_at("Apps",205,14,CLR_DIM);
@@ -176,37 +177,54 @@ static void draw_topbar() {
 }
 
 // ── Sidebar ──────────────────────────────────────────────────
+// Single source of truth for sidebar layout — used by BOTH drawing and click detection
+#define SIDEBAR_ROW_H 50
+#define SIDEBAR_TOP   (TOPBAR_H + 10)
+
 static void draw_sidebar() {
     Framebuffer::Info& fb = Framebuffer::get_info();
     uint32_t H = fb.height;
     Framebuffer::draw_rect(0,TOPBAR_H,SIDEBAR_W,H-TOPBAR_H,0x08031E);
     Framebuffer::draw_rect(SIDEBAR_W-1,TOPBAR_H,1,H-TOPBAR_H,0x1A0855);
-    int y=TOPBAR_H+16;
-    Framebuffer::print_at("PINNED",12,y,CLR_GRAY); y+=16;
+
     struct Nav { const char* label; const char* sub; uint32_t col; bool active; };
-    Nav items[]={
-        {"Dashboard","Home screen",CLR_CYAN,false},
-        {"Nova Browser","Browse the web",CLR_CYAN,false},
-        {"Nova Docs","Office suite",CLR_PINK,false},
-        {"Game Mode","Launch games",CLR_PINK,false},
-        {"Terminal","Nova Shell",CLR_VIOLET,true},
+    Nav items[] = {
+        {"Dashboard",    "Home screen",    CLR_CYAN,   false},
+        {"Nova Browser", "Browse the web", CLR_CYAN,   false},
+        {"Nova Docs",    "Office suite",   CLR_PINK,   false},
+        {"Game Mode",    "Launch games",   CLR_PINK,   false},
+        {"Terminal",     "Nova Shell",     CLR_VIOLET, true},
+        {"Nova Files",   "NovaFS",         CLR_DIM,    false},
+        {"Nova Store",   "Apps",           CLR_DIM,    false},
+        {"Settings",     "CPU/GPU/RAM",    CLR_DIM,    false},
     };
-    for(int i=0;i<5;i++){
-        if(items[i].active){Framebuffer::draw_rect(4,y-2,SIDEBAR_W-8,22,0x1A0844);Framebuffer::draw_rect(4,y-2,2,22,CLR_VIOLET);}
-        Framebuffer::draw_circle(18,y+7,4,items[i].col);
-        Framebuffer::print_at(items[i].label,30,y,CLR_WHITE);
-        Framebuffer::print_at(items[i].sub,30,y+10,CLR_GRAY);
-        y+=28;
+
+    for (int i = 0; i < 8; i++) {
+        int top = SIDEBAR_TOP + i * SIDEBAR_ROW_H;
+        if (items[i].active) {
+            Framebuffer::draw_rect(2, top+2, SIDEBAR_W-6, SIDEBAR_ROW_H-4, 0x1A0844);
+            Framebuffer::draw_rect(2, top+2, 2, SIDEBAR_ROW_H-4, CLR_VIOLET);
+        }
+        // Divider before System section (between item 4 and 5)
+        if (i == 5) {
+            Framebuffer::draw_rect(12, top-6, SIDEBAR_W-24, 1, 0x1A0855);
+        }
+        Framebuffer::draw_circle(20, top+18, 4, items[i].col);
+        Framebuffer::print_at(items[i].label, 32, top+12, CLR_WHITE);
+        Framebuffer::print_at(items[i].sub,   32, top+24, CLR_GRAY);
     }
-    Framebuffer::draw_rect(12,y,SIDEBAR_W-24,1,0x1A0855); y+=10;
-    Framebuffer::print_at("SYSTEM",12,y,CLR_GRAY); y+=16;
-    Nav sys[]={ {"Nova Files","NovaFS",CLR_DIM,false}, {"Nova Store","Apps",CLR_DIM,false}, {"Settings","CPU/GPU/RAM",CLR_DIM,false} };
-    for(int i=0;i<3;i++){
-        Framebuffer::draw_circle(18,y+7,4,sys[i].col);
-        Framebuffer::print_at(sys[i].label,30,y,CLR_DIM);
-        Framebuffer::print_at(sys[i].sub,30,y+10,CLR_GRAY);
-        y+=28;
-    }
+}
+
+// Returns 0-7 for which sidebar item was hit, or -1 if none.
+// Uses the EXACT same constants as draw_sidebar() above.
+static int sidebar_hit_test(int mx, int my) {
+    if (mx < 0 || mx >= SIDEBAR_W) return -1;
+    if (my < SIDEBAR_TOP) return -1;
+    int idx = (my - SIDEBAR_TOP) / SIDEBAR_ROW_H;
+    if (idx < 0 || idx > 7) return -1;
+    int top = SIDEBAR_TOP + idx * SIDEBAR_ROW_H;
+    if (my >= top + SIDEBAR_ROW_H) return -1; // in the gap, shouldn't happen but be safe
+    return idx;
 }
 
 // ── Cursor ───────────────────────────────────────────────────
@@ -317,43 +335,18 @@ void Shell::run() {
         Mouse::poll();
         Mouse::State& ms = Mouse::get_state();
 
-        bool clicked = ms.left && !last_left;
-        last_left = ms.left;
-        if (f1_pressed) { f1_pressed = false; clicked = true; }
+        (void)last_left;
+        (void)ms;
 
+        // Sidebar navigation via number keys 1-8 (stable, no mouse-click dependency)
+        if (kb_head != kb_tail) {
+            char peek = kb_buf[kb_tail];
+            int hit = -1;
+            if (input_len == 0 && peek >= '1' && peek <= '8') hit = peek - '1';
 
-        // Show Y coordinate always in top-left
-        {
-            char dbg[16]; int di=0;
-            int yv=ms.y; char ys[8]; int yi=0;
-            if(!yv){ys[yi++]='0';}
-            while(yv){ys[yi++]='0'+(yv%10);yv/=10;}
-            dbg[di++]='Y'; dbg[di++]=':';
-            for(int i=yi-1;i>=0;i--) dbg[di++]=ys[i];
-            dbg[di++]=' ';
-            int xv=ms.x; char xs[8]; int xi=0;
-            if(!xv){xs[xi++]='0';}
-            while(xv){xs[xi++]='0'+(xv%10);xv/=10;}
-            dbg[di++]='X'; dbg[di++]=':';
-            for(int i=xi-1;i>=0;i--) dbg[di++]=xs[i];
-            dbg[di]=0;
-            Framebuffer::draw_rect(0,0,140,14,0x000000);
-            Framebuffer::print_at(dbg,2,3,0x00FF00);
-        }
+            if (hit >= 0) {
+                kb_tail = (kb_tail + 1) % 256; // consume the digit key
 
-
-
-        // Sidebar click
-        if (clicked) {
-            if (ms.x >= 0 && ms.x < SIDEBAR_W) {
-                // Sidebar hit test
-                // Items start at y = TOPBAR_H+16+16 = TOPBAR_H+32
-                // Each item is 28px tall
-                // Divide sidebar into 8 equal click zones below topbar
-                int hit = -1;
-                int sy = ms.y - TOPBAR_H;
-                if (sy >= 0) hit = sy / 36; // 36px per zone
-                if (hit > 7) hit = -1;
                 Framebuffer::Info& fb2 = Framebuffer::get_info();
                 int cw = (int)fb2.width - SIDEBAR_W - PADDING*2;
                 (void)cw;
