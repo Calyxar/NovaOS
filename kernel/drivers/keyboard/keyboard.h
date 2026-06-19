@@ -13,4 +13,8 @@ namespace Keyboard {
 
 // F1 key press flag — set when F1 is pressed, cleared after reading
 extern bool f1_pressed;
+extern bool f2_pressed;
+extern bool up_pressed;
+extern bool down_pressed;
+extern bool esc_pressed;
 

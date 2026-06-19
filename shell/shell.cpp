@@ -2,6 +2,10 @@
 #include "../kernel/drivers/keyboard/keyboard.h"
 #include "../kernel/drivers/video/framebuffer.h"
 #include "../kernel/drivers/mouse/mouse.h"
+extern bool up_pressed;
+extern bool down_pressed;
+extern bool esc_pressed;
+extern bool f2_pressed;
 #include "../kernel/fs/ramfs.h"
 #include "../kernel/proc/scheduler.h"
 #include "../kernel/panic.h"
@@ -21,6 +25,7 @@ static int  input_len = 0;
 #define CLR_RED     0xFF4444
 
 #define SIDEBAR_W   180
+#define SEPARATOR_HEIGHT 1
 #define TOPBAR_H    36
 #define PADDING     10
 
@@ -177,7 +182,6 @@ static void draw_topbar() {
 }
 
 // ── Sidebar ──────────────────────────────────────────────────
-// Single source of truth for sidebar layout — used by BOTH drawing and click detection
 #define SIDEBAR_ROW_H 50
 #define SIDEBAR_TOP   (TOPBAR_H + 10)
 
@@ -189,7 +193,7 @@ static void draw_sidebar() {
 
     struct Nav { const char* label; const char* sub; uint32_t col; bool active; };
     Nav items[] = {
-        {"Dashboard",    "Home screen",    CLR_CYAN,   false},
+        {"Dashboard",    "Home screen",    CLR_CYAN,   true},
         {"Nova Browser", "Browse the web", CLR_CYAN,   false},
         {"Nova Docs",    "Office suite",   CLR_PINK,   false},
         {"Game Mode",    "Launch games",   CLR_PINK,   false},
@@ -205,7 +209,6 @@ static void draw_sidebar() {
             Framebuffer::draw_rect(2, top+2, SIDEBAR_W-6, SIDEBAR_ROW_H-4, 0x1A0844);
             Framebuffer::draw_rect(2, top+2, 2, SIDEBAR_ROW_H-4, CLR_VIOLET);
         }
-        // Divider before System section (between item 4 and 5)
         if (i == 5) {
             Framebuffer::draw_rect(12, top-6, SIDEBAR_W-24, 1, 0x1A0855);
         }
@@ -215,20 +218,29 @@ static void draw_sidebar() {
     }
 }
 
-// Returns 0-7 for which sidebar item was hit, or -1 if none.
-// Uses the EXACT same constants as draw_sidebar() above.
+// Example logic to match your draw loop exactly
 static int sidebar_hit_test(int mx, int my) {
     if (mx < 0 || mx >= SIDEBAR_W) return -1;
     if (my < SIDEBAR_TOP) return -1;
-    int idx = (my - SIDEBAR_TOP) / SIDEBAR_ROW_H;
-    if (idx < 0 || idx > 7) return -1;
-    int top = SIDEBAR_TOP + idx * SIDEBAR_ROW_H;
-    if (my >= top + SIDEBAR_ROW_H) return -1; // in the gap, shouldn't happen but be safe
-    return idx;
+
+    for (int i = 0; i < 8; i++) {
+        // Calculate standard top position
+        int top = SIDEBAR_TOP + (i * SIDEBAR_ROW_H);
+        
+        // If we have passed the separator (index 5), apply the offset
+        if (i > 5) {
+            top += SEPARATOR_HEIGHT;
+        }
+
+        // Check if the click falls within this row's boundaries
+        if (my >= top && my < top + SIDEBAR_ROW_H) {
+            return i;
+        }
+    }
+    return -1;
 }
 
-// ── Cursor ───────────────────────────────────────────────────
-static void draw_cursor() {} // host cursor used instead
+static void draw_cursor() {} 
 
 // ── Header ───────────────────────────────────────────────────
 static void draw_header() {
@@ -250,6 +262,172 @@ static void draw_header() {
     cpln("  Nova Shell v0.2.0 - pixel mode",CLR_CYAN);
     cpln("  Type 'help' for commands.",CLR_DIM);
     cp("\n",CLR_WHITE);
+}
+
+// ── Nova Files browser state ────────────────────────────────
+#define MAX_FILE_ENTRIES 32
+static char  file_names[MAX_FILE_ENTRIES][32];
+static uint32_t file_sizes[MAX_FILE_ENTRIES];
+static int   file_count = 0;
+static int   file_selected = 0;
+static bool  files_panel_active = false;
+static bool  file_viewer_active = false;
+
+static int file_collect_idx = 0;
+static void collect_file_cb(const char* name, uint32_t size) {
+    if (file_collect_idx >= MAX_FILE_ENTRIES) return;
+    int i = 0;
+    while (name[i] && i < 31) { file_names[file_collect_idx][i] = name[i]; i++; }
+    file_names[file_collect_idx][i] = '\0';
+    file_sizes[file_collect_idx] = size;
+    file_collect_idx++;
+}
+
+static void draw_file_list() {
+    Framebuffer::Info& fb = Framebuffer::get_info();
+    int cx = SIDEBAR_W + PADDING;
+    int cw = (int)fb.width - SIDEBAR_W - PADDING*2;
+
+    Framebuffer::draw_rect(cx, TOPBAR_H+PADDING, cw, 280, 0x0A0525);
+    Framebuffer::draw_rect(cx, TOPBAR_H+PADDING, cw, 1, CLR_CYAN);
+    Framebuffer::print_at("Nova Files", cx+10, TOPBAR_H+PADDING+10, CLR_CYAN);
+    Framebuffer::print_at("Arrows: navigate | Enter: open | Esc: back",
+                          cx+10, TOPBAR_H+PADDING+26, CLR_DIM);
+
+    int ly = TOPBAR_H+PADDING+50;
+    for (int i = 0; i < file_count; i++) {
+        bool sel = (i == file_selected);
+        if (sel) {
+            Framebuffer::draw_rect(cx+8, ly-2, cw-16, 16, 0x1A0855);
+        }
+        Framebuffer::draw_circle(cx+18, ly+5, 3, sel ? CLR_CYAN : CLR_DIM);
+        Framebuffer::print_at(file_names[i], cx+30, ly, sel ? CLR_WHITE : CLR_DIM);
+
+        char sbuf[16]; int si=0;
+        uint32_t s2 = file_sizes[i];
+        if (!s2) sbuf[si++]='0';
+        while (s2) { sbuf[si++]='0'+(s2%10); s2/=10; }
+        char sout[16]; for(int j=0;j<si;j++) sout[j]=sbuf[si-1-j];
+        sout[si]='b'; sout[si+1]=0;
+        Framebuffer::print_at(sout, cx+cw-70, ly, CLR_GRAY);
+
+        ly += 18;
+    }
+
+    if (file_count == 0) {
+        Framebuffer::print_at("No files in NovaFS.", cx+30, ly, CLR_GRAY);
+    }
+}
+
+static void draw_file_viewer() {
+    Framebuffer::Info& fb = Framebuffer::get_info();
+    int cx = SIDEBAR_W + PADDING;
+    int cw = (int)fb.width - SIDEBAR_W - PADDING*2;
+
+    Framebuffer::draw_rect(cx, TOPBAR_H+PADDING, cw, 280, 0x0A0525);
+    Framebuffer::draw_rect(cx, TOPBAR_H+PADDING, cw, 1, CLR_PINK);
+
+    RamFile* f = RamFS::find(file_names[file_selected]);
+    Framebuffer::print_at(file_names[file_selected], cx+10, TOPBAR_H+PADDING+10, CLR_PINK);
+    Framebuffer::print_at("Esc: back to file list", cx+10, TOPBAR_H+PADDING+26, CLR_DIM);
+    Framebuffer::draw_rect(cx+8, TOPBAR_H+PADDING+44, cw-16, 1, 0x1A0855);
+
+    if (f) {
+        Framebuffer::print_at(f->data, cx+10, TOPBAR_H+PADDING+56, CLR_WHITE);
+    } else {
+        Framebuffer::print_at("(file not found)", cx+10, TOPBAR_H+PADDING+56, CLR_RED);
+    }
+}
+
+static void open_files_panel() {
+    file_collect_idx = 0;
+    RamFS::list(collect_file_cb);
+    file_count = file_collect_idx;
+    file_selected = 0;
+    files_panel_active = true;
+    file_viewer_active = false;
+    draw_file_list();
+}
+
+// ── Nova Docs editor state ──────────────────────────────────
+#define DOC_BUF_SIZE 2048
+static char doc_buffer[DOC_BUF_SIZE];
+static int  doc_len = 0;
+static char doc_filename[32] = "untitled.txt";
+static bool docs_panel_active = false;
+static int  doc_cursor_line = 0;
+static int  doc_cursor_col = 0;
+
+static void draw_docs_editor() {
+    Framebuffer::Info& fb = Framebuffer::get_info();
+    int cx = SIDEBAR_W + PADDING;
+    int cw = (int)fb.width - SIDEBAR_W - PADDING*2;
+
+    Framebuffer::draw_rect(cx, TOPBAR_H+PADDING, cw, 320, 0x0A0525);
+    Framebuffer::draw_rect(cx, TOPBAR_H+PADDING, cw, 1, CLR_PINK);
+    Framebuffer::print_at("Nova Docs", cx+10, TOPBAR_H+PADDING+10, CLR_PINK);
+    Framebuffer::print_at(doc_filename, cx+110, TOPBAR_H+PADDING+10, CLR_DIM);
+    Framebuffer::print_at("F2: save | Esc: back to sidebar",
+                          cx+10, TOPBAR_H+PADDING+26, CLR_DIM);
+    Framebuffer::draw_rect(cx+8, TOPBAR_H+PADDING+42, cw-16, 1, 0x1A0855);
+
+    // Render the text buffer line by line
+    int ty = TOPBAR_H+PADDING+54;
+    int tx = cx+10;
+    int line = 0, col = 0;
+    int draw_x = tx, draw_y = ty;
+    for (int i = 0; i < doc_len; i++) {
+        char ch = doc_buffer[i];
+        if (ch == '\n') {
+            line++; col = 0;
+            draw_x = tx; draw_y = ty + line*10;
+            continue;
+        }
+        Framebuffer::draw_char(ch, draw_x, draw_y, CLR_WHITE);
+        draw_x += 8; col++;
+    }
+
+    // Blinking cursor at current write position (always end of buffer for simplicity)
+    bool cur_on = (pit_ticks / 400) % 2 == 0;
+    if (cur_on) {
+        Framebuffer::draw_rect(draw_x, draw_y, 6, 9, CLR_PINK);
+    }
+}
+
+static void load_doc(const char* name) {
+    int i = 0;
+    while (name[i] && i < 31) { doc_filename[i] = name[i]; i++; }
+    doc_filename[i] = '\0';
+
+    RamFile* f = RamFS::find(name);
+    doc_len = 0;
+    if (f) {
+        int j = 0;
+        while (f->data[j] && doc_len < DOC_BUF_SIZE-1) {
+            doc_buffer[doc_len++] = f->data[j++];
+        }
+    }
+    doc_buffer[doc_len] = '\0';
+}
+
+static void save_doc() {
+    RamFS::write(doc_filename, doc_buffer, (uint32_t)doc_len);
+    if (!RamFS::find(doc_filename)) {
+        RamFS::create(doc_filename);
+        RamFS::write(doc_filename, doc_buffer, (uint32_t)doc_len);
+    }
+}
+
+static void open_docs_panel() {
+    // Default to a fresh untitled doc each time Nova Docs is opened from sidebar
+    doc_filename[0]='u';doc_filename[1]='n';doc_filename[2]='t';doc_filename[3]='i';
+    doc_filename[4]='t';doc_filename[5]='l';doc_filename[6]='e';doc_filename[7]='d';
+    doc_filename[8]='.';doc_filename[9]='t';doc_filename[10]='x';doc_filename[11]='t';
+    doc_filename[12]='\0';
+    doc_len = 0;
+    doc_buffer[0] = '\0';
+    docs_panel_active = true;
+    draw_docs_editor();
 }
 
 // ── App panels ───────────────────────────────────────────────
@@ -314,10 +492,8 @@ static void handle_command(const char* cmd) {
     else{cp("  Unknown: ",CLR_RED);cpln(cmd,CLR_WHITE);}
 }
 
-// ── prompt ───────────────────────────────────────────────────
 static void draw_prompt() { cp("> ",CLR_CYAN); }
 
-// ── Init ─────────────────────────────────────────────────────
 void Shell::init() {
     input_len=0;
     RamFS::init();
@@ -326,67 +502,166 @@ void Shell::init() {
     draw_prompt();
 }
 
+// ---> EXTRACTED HELPER FUNCTION <---
+static void execute_nav(int hit) {
+    if (hit != 2) docs_panel_active = false;
+    if (hit == 0) {
+        files_panel_active = false; file_viewer_active = false;
+        draw_header();
+    }
+    else if (hit == 1) {
+        files_panel_active = false; file_viewer_active = false;
+        open_panel("Nova Browser",CLR_CYAN,"Coming soon — Phase 3 roadmap.","Full browser with Nova engine.");
+    }
+    else if (hit == 2) {
+        files_panel_active = false; file_viewer_active = false;
+        open_docs_panel();
+    }
+    else if (hit == 3) {
+        files_panel_active = false; file_viewer_active = false;
+        open_panel("Game Mode",CLR_PINK,"NVIDIA GPU + Vulkan — Phase 4.","DLSS, FSR, Nova Overlay.");
+    }
+    else if (hit == 4) {
+        files_panel_active = false; file_viewer_active = false;
+        draw_header();
+    }
+    else if (hit == 5) {
+        open_files_panel();
+    }
+    else if (hit == 6) {
+        files_panel_active = false; file_viewer_active = false;
+        open_panel("Nova Store",CLR_VIOLET,"App marketplace — Phase 5.","Native + Proton games.");
+    }
+    else if (hit == 7) {
+        files_panel_active = false; file_viewer_active = false;
+        open_panel("Settings",CLR_WHITE,"","");
+        cpln("  CPU:  x86 i686 32-bit Protected",CLR_DIM);
+        cpln("  GPU:  NVIDIA (roadmap)",CLR_DIM);
+        cpln("  RAM:  ~30MB",CLR_DIM);
+        cpln("  VESA: 800x600x32bpp",CLR_DIM);
+        cpln("  Kernel: C/C++/ASM",CLR_DIM);
+    }
+}
+
 // ── Run loop (non-blocking) ───────────────────────────────────
 void Shell::run() {
     static bool last_left = false;
+    
+    // Mouse coordinates initialized to center of 800x600 screen
+    static int mouse_x = 400; 
+    static int mouse_y = 300;
 
     while (true) {
-        // Mouse
+        // MOUSE POLLING
         Mouse::poll();
         Mouse::State& ms = Mouse::get_state();
 
+        // Update to absolute coordinates
+        mouse_x = ms.x; 
+        mouse_y = ms.y; 
+        
+        // Clamping to screen boundaries
+        if (mouse_x < 0) mouse_x = 0; if (mouse_x > 799) mouse_x = 799;
+        if (mouse_y < 0) mouse_y = 0; if (mouse_y > 599) mouse_y = 599;
+
+        // Mouse click handling — use a small history buffer to reliably
+        // catch the press edge even on very fast clicks
+        static bool left_hist[3] = {false,false,false};
+        left_hist[2] = left_hist[1];
+        left_hist[1] = left_hist[0];
+        left_hist[0] = ms.left;
+        bool mouse_clicked = left_hist[0] && !left_hist[1];
         (void)last_left;
-        (void)ms;
 
-        // Sidebar navigation via number keys 1-8 (stable, no mouse-click dependency)
-        if (kb_head != kb_tail) {
-            char peek = kb_buf[kb_tail];
-            int hit = -1;
-            if (input_len == 0 && peek >= '1' && peek <= '8') hit = peek - '1';
-
+        if (mouse_clicked) {
+            int hit = sidebar_hit_test(mouse_x, mouse_y);
             if (hit >= 0) {
-                kb_tail = (kb_tail + 1) % 256; // consume the digit key
+                execute_nav(hit);
+            }
+        }
 
-                Framebuffer::Info& fb2 = Framebuffer::get_info();
-                int cw = (int)fb2.width - SIDEBAR_W - PADDING*2;
-                (void)cw;
-                if (hit == 0) draw_header();
-                else if (hit == 1) open_panel("Nova Browser",CLR_CYAN,"Coming soon — Phase 3 roadmap.","Full browser with Nova engine.");
-                else if (hit == 2) open_panel("Nova Docs",CLR_PINK,"Office suite — word, sheets, slides.","Coming in Phase 3.");
-                else if (hit == 3) open_panel("Game Mode",CLR_PINK,"NVIDIA GPU + Vulkan — Phase 4.","DLSS, FSR, Nova Overlay.");
-                else if (hit == 4) draw_header();
-                else if (hit == 5) {
-                    open_panel("Nova Files",CLR_CYAN,"NovaFS — in-memory filesystem.","");
-                    RamFS::list(ls_cb);
+        // KEYBOARD NAVIGATION (1-8) — disabled while typing in Nova Docs,
+        // since digits there are document content, not navigation
+        if (kb_head != kb_tail && !docs_panel_active) {
+            char peek = kb_buf[kb_tail];
+            if (input_len == 0 && peek >= '1' && peek <= '8') {
+                kb_tail = (kb_tail + 1) % 256;
+                execute_nav(peek - '1');
+            }
+        }
+
+        // FILES PANEL NAVIGATION
+        if (files_panel_active) {
+            if (up_pressed) {
+                up_pressed = false;
+                if (!file_viewer_active && file_selected > 0) {
+                    file_selected--;
+                    draw_file_list();
                 }
-                else if (hit == 6) open_panel("Nova Store",CLR_VIOLET,"App marketplace — Phase 5.","Native + Proton games.");
-                else if (hit == 7) {
-                    open_panel("Settings",CLR_WHITE,"","");
-                    cpln("  CPU:  x86 i686 32-bit Protected",CLR_DIM);
-                    cpln("  GPU:  NVIDIA (roadmap)",CLR_DIM);
-                    cpln("  RAM:  ~30MB",CLR_DIM);
-                    cpln("  VESA: 800x600x32bpp",CLR_DIM);
-                    cpln("  Kernel: C/C++/ASM",CLR_DIM);
+            }
+            if (down_pressed) {
+                down_pressed = false;
+                if (!file_viewer_active && file_selected < file_count - 1) {
+                    file_selected++;
+                    draw_file_list();
+                }
+            }
+            if (esc_pressed) {
+                esc_pressed = false;
+                if (file_viewer_active) {
+                    file_viewer_active = false;
+                    draw_file_list();
+                } else {
+                    files_panel_active = false;
+                    draw_header();
                 }
             }
         }
 
-        // Cursor
-
-        // Topbar refresh every second
+        // TOPBAR REFRESH
         static uint32_t ltop = 0;
         if (pit_ticks - ltop > 1000) { ltop = pit_ticks; draw_topbar(); }
 
-        // Blink text cursor
+        // BLINK CURSOR
         bool cur_on = (pit_ticks / 400) % 2 == 0;
-        Framebuffer::draw_rect(content_x, content_y, 6, 9,
-            cur_on ? CLR_VIOLET : CLR_BG);
+        Framebuffer::draw_rect(content_x, content_y, 6, 9, cur_on ? CLR_VIOLET : CLR_BG);
 
-        // Non-blocking keyboard
+        // KEYBOARD INPUT HANDLING
         if (kb_head == kb_tail) continue;
         Framebuffer::draw_rect(content_x, content_y, 6, 9, CLR_BG);
         char c = kb_buf[kb_tail];
-        kb_tail = (kb_tail+1) % 256;
+        
+        if (c == '\n' && files_panel_active && !file_viewer_active && file_count > 0) {
+            kb_tail = (kb_tail + 1) % 256;
+            file_viewer_active = true;
+            draw_file_viewer();
+            continue;
+        }
+
+        // Nova Docs editor: capture all typing directly into doc_buffer,
+        // bypassing the shell prompt entirely while active
+        if (docs_panel_active) {
+            kb_tail = (kb_tail + 1) % 256;
+
+            if (f2_pressed) { f2_pressed = false; save_doc(); continue; }
+            if (esc_pressed) {
+                esc_pressed = false;
+                docs_panel_active = false;
+                draw_header();
+                continue;
+            }
+
+            if (c == '\b') {
+                if (doc_len > 0) doc_len--;
+            } else if (doc_len < DOC_BUF_SIZE-1) {
+                doc_buffer[doc_len++] = c;
+            }
+            doc_buffer[doc_len] = '\0';
+            draw_docs_editor();
+            continue;
+        }
+
+        kb_tail = (kb_tail + 1) % 256;
 
         if (c == '\n') {
             input_buf[input_len] = '\0';
