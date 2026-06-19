@@ -69,7 +69,7 @@ iso: kernel
 	@echo "  [ISO] $(ISO_FILE)"
 
 run: iso
-	qemu-system-i386 -cdrom $(ISO_FILE) -m 256M -display sdl,show-cursor=on
+	qemu-system-i386 -cdrom $(ISO_FILE) -drive file=build/novadisk.img,format=raw -m 256M -display sdl,show-cursor=on
 
 run-kvm: iso
 	qemu-system-x86_64 -cdrom $(ISO_FILE) -m 512M -enable-kvm -cpu host -smp 4

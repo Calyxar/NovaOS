@@ -13,6 +13,7 @@
 #include "../shell/shell.h"
 #include "../shell/splash.h"
 #include "drivers/mouse/mouse.h"
+#include "drivers/disk/ata.h"
 
 // Serial port debug output
 static void serial_init() {
@@ -118,6 +119,7 @@ extern "C" void kernel_main(MultibootInfo* mbi, uint32_t magic) {
     serial_print("Init keyboard\n");
     Keyboard::init();
     Mouse::init();
+    ATA::init();
     serial_print("Init VFS\n");
     VFS::init();
     serial_print("Init IPC\n");

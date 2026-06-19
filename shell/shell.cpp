@@ -9,6 +9,7 @@ extern bool f2_pressed;
 #include "../kernel/fs/ramfs.h"
 #include "../kernel/proc/scheduler.h"
 #include "../kernel/panic.h"
+#include "../kernel/drivers/disk/ata.h"
 
 static char input_buf[256];
 static int  input_len = 0;
@@ -329,7 +330,7 @@ static void draw_file_viewer() {
 
     RamFile* f = RamFS::find(file_names[file_selected]);
     Framebuffer::print_at(file_names[file_selected], cx+10, TOPBAR_H+PADDING+10, CLR_PINK);
-    Framebuffer::print_at("Esc: back to file list", cx+10, TOPBAR_H+PADDING+26, CLR_DIM);
+    Framebuffer::print_at("Esc: back to file list | F2: edit in Nova Docs", cx+10, TOPBAR_H+PADDING+26, CLR_DIM);
     Framebuffer::draw_rect(cx+8, TOPBAR_H+PADDING+44, cw-16, 1, 0x1A0855);
 
     if (f) {
@@ -488,6 +489,20 @@ static void handle_command(const char* cmd) {
     }
     else if(streq(cmd,"color")){cpln("  CYAN",CLR_CYAN);cpln("  VIOLET",CLR_VIOLET);cpln("  PINK",CLR_PINK);}
     else if(streq(cmd,"panic")){PANIC("Manual panic from shell");}
+    else if(streq(cmd,"disktest")){
+        cpln("\n  Testing ATA disk driver...",CLR_CYAN);
+        static uint8_t wbuf[512];
+        static uint8_t rbuf[512];
+        for (int i=0;i<512;i++) wbuf[i] = (uint8_t)(i & 0xFF);
+        bool wok = ATA::write_sector(100, wbuf);
+        cp("  Write sector 100: ",CLR_WHITE); cpln(wok?"OK":"FAIL", wok?CLR_GREEN:CLR_RED);
+        bool rok = ATA::read_sector(100, rbuf);
+        cp("  Read sector 100:  ",CLR_WHITE); cpln(rok?"OK":"FAIL", rok?CLR_GREEN:CLR_RED);
+        bool match = true;
+        for (int i=0;i<512;i++) if (rbuf[i]!=wbuf[i]) { match=false; break; }
+        cp("  Data match:       ",CLR_WHITE); cpln(match?"OK":"MISMATCH", match?CLR_GREEN:CLR_RED);
+        cp("\n",CLR_WHITE);
+    }
     else if(cmd[0]=='\0'){}
     else{cp("  Unknown: ",CLR_RED);cpln(cmd,CLR_WHITE);}
 }
@@ -615,6 +630,14 @@ void Shell::run() {
                     files_panel_active = false;
                     draw_header();
                 }
+            }
+            if (f2_pressed && file_viewer_active && file_count > 0) {
+                f2_pressed = false;
+                load_doc(file_names[file_selected]);
+                files_panel_active = false;
+                file_viewer_active = false;
+                docs_panel_active = true;
+                draw_docs_editor();
             }
         }
 
