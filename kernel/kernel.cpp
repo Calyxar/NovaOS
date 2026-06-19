@@ -14,6 +14,7 @@
 #include "../shell/splash.h"
 #include "drivers/mouse/mouse.h"
 #include "drivers/disk/ata.h"
+#include "fs/novafs_disk.h"
 
 // Serial port debug output
 static void serial_init() {
@@ -120,6 +121,7 @@ extern "C" void kernel_main(MultibootInfo* mbi, uint32_t magic) {
     Keyboard::init();
     Mouse::init();
     ATA::init();
+    NovaFSDisk::init();
     serial_print("Init VFS\n");
     VFS::init();
     serial_print("Init IPC\n");

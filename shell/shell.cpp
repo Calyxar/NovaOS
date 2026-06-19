@@ -10,6 +10,7 @@ extern bool f2_pressed;
 #include "../kernel/proc/scheduler.h"
 #include "../kernel/panic.h"
 #include "../kernel/drivers/disk/ata.h"
+#include "../kernel/fs/novafs_disk.h"
 
 static char input_buf[256];
 static int  input_len = 0;
@@ -489,6 +490,27 @@ static void handle_command(const char* cmd) {
     }
     else if(streq(cmd,"color")){cpln("  CYAN",CLR_CYAN);cpln("  VIOLET",CLR_VIOLET);cpln("  PINK",CLR_PINK);}
     else if(streq(cmd,"panic")){PANIC("Manual panic from shell");}
+    else if(startswith(cmd,"dsave ")){
+        const char* r=cmd+6; int i=0; while(r[i]&&r[i]!=' ')i++;
+        if(r[i]==' '){
+            char fn[32]; for(int j=0;j<i&&j<31;j++) fn[j]=r[j]; fn[i]=0;
+            const char* cnt=r+i+1; uint32_t len=0; while(cnt[len]) len++;
+            bool ok = NovaFSDisk::save_file(fn, cnt, len);
+            cp("  Disk save: ",CLR_WHITE); cpln(ok?"OK":"FAIL", ok?CLR_GREEN:CLR_RED);
+        } else cpln("  Usage: dsave <file> <text>",CLR_YELLOW);
+    }
+    else if(startswith(cmd,"dload ")){
+        static char buf[2048];
+        uint32_t sz=0;
+        bool ok = NovaFSDisk::load_file(cmd+6, buf, 2047, &sz);
+        if (ok) { cp("  ",CLR_WHITE); cpln(buf,CLR_CYAN); }
+        else cpln("  Not found on disk",CLR_RED);
+    }
+    else if(streq(cmd,"dls")){
+        cpln("\n  NovaFS-Disk Files",CLR_CYAN);
+        NovaFSDisk::list_files(ls_cb);
+        cp("\n",CLR_WHITE);
+    }
     else if(streq(cmd,"disktest")){
         cpln("\n  Testing ATA disk driver...",CLR_CYAN);
         static uint8_t wbuf[512];
