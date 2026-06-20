@@ -329,13 +329,16 @@ static void draw_file_viewer() {
     Framebuffer::draw_rect(cx, TOPBAR_H+PADDING, cw, 280, 0x0A0525);
     Framebuffer::draw_rect(cx, TOPBAR_H+PADDING, cw, 1, CLR_PINK);
 
-    RamFile* f = RamFS::find(file_names[file_selected]);
+    static char view_buf[2048];
+    uint32_t view_size = 0;
+    bool found = NovaFSDisk::load_file(file_names[file_selected], view_buf, 2047, &view_size);
+
     Framebuffer::print_at(file_names[file_selected], cx+10, TOPBAR_H+PADDING+10, CLR_PINK);
     Framebuffer::print_at("Esc: back to file list | F2: edit in Nova Docs", cx+10, TOPBAR_H+PADDING+26, CLR_DIM);
     Framebuffer::draw_rect(cx+8, TOPBAR_H+PADDING+44, cw-16, 1, 0x1A0855);
 
-    if (f) {
-        Framebuffer::print_at(f->data, cx+10, TOPBAR_H+PADDING+56, CLR_WHITE);
+    if (found) {
+        Framebuffer::print_at(view_buf, cx+10, TOPBAR_H+PADDING+56, CLR_WHITE);
     } else {
         Framebuffer::print_at("(file not found)", cx+10, TOPBAR_H+PADDING+56, CLR_RED);
     }
@@ -343,7 +346,7 @@ static void draw_file_viewer() {
 
 static void open_files_panel() {
     file_collect_idx = 0;
-    RamFS::list(collect_file_cb);
+    NovaFSDisk::list_files(collect_file_cb);
     file_count = file_collect_idx;
     file_selected = 0;
     files_panel_active = true;
@@ -401,23 +404,14 @@ static void load_doc(const char* name) {
     while (name[i] && i < 31) { doc_filename[i] = name[i]; i++; }
     doc_filename[i] = '\0';
 
-    RamFile* f = RamFS::find(name);
-    doc_len = 0;
-    if (f) {
-        int j = 0;
-        while (f->data[j] && doc_len < DOC_BUF_SIZE-1) {
-            doc_buffer[doc_len++] = f->data[j++];
-        }
-    }
+    uint32_t loaded_size = 0;
+    bool ok = NovaFSDisk::load_file(name, doc_buffer, DOC_BUF_SIZE-1, &loaded_size);
+    doc_len = ok ? (int)loaded_size : 0;
     doc_buffer[doc_len] = '\0';
 }
 
 static void save_doc() {
-    RamFS::write(doc_filename, doc_buffer, (uint32_t)doc_len);
-    if (!RamFS::find(doc_filename)) {
-        RamFS::create(doc_filename);
-        RamFS::write(doc_filename, doc_buffer, (uint32_t)doc_len);
-    }
+    NovaFSDisk::save_file(doc_filename, doc_buffer, (uint32_t)doc_len);
 }
 
 static void open_docs_panel() {

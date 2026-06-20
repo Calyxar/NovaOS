@@ -120,6 +120,9 @@ extern "C" void kernel_main(MultibootInfo* mbi, uint32_t magic) {
     serial_print("Init keyboard\n");
     Keyboard::init();
     Mouse::init();
+    if (got_vesa) {
+        Mouse::set_bounds((int32_t)mbi->framebuffer_width, (int32_t)mbi->framebuffer_height);
+    }
     ATA::init();
     NovaFSDisk::init();
     serial_print("Init VFS\n");
