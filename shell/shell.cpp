@@ -66,7 +66,7 @@ static void cp(const char* s, uint32_t c) {
     int px = content_x;
     for (int i = 0; s[i]; i++) {
         char ch = s[i];
-        if (ch == '\n') { content_x = SIDEBAR_W+PADDING; content_y += 10; px = content_x; continue; }
+        if (ch == '\n') { content_x = SIDEBAR_W+PADDING; content_y += 18; px = content_x; continue; }
         if (ch == '\b') { if (px > SIDEBAR_W+PADDING) { px -= 8; Framebuffer::draw_rect(px,content_y,8,10,CLR_BG); } content_x=px; continue; }
         Framebuffer::draw_char(ch, px, content_y, c);
         px += 8;
@@ -208,7 +208,7 @@ static void draw_sidebar() {
     for (int i = 0; i < 8; i++) {
         int top = SIDEBAR_TOP + i * SIDEBAR_ROW_H;
         if (items[i].active) {
-            Framebuffer::draw_rect(2, top+2, SIDEBAR_W-6, SIDEBAR_ROW_H-4, 0x1A0844);
+            Framebuffer::draw_rounded_rect(2, top+2, SIDEBAR_W-6, SIDEBAR_ROW_H-4, 12, 0x1A0844);
             Framebuffer::draw_rect(2, top+2, 2, SIDEBAR_ROW_H-4, CLR_VIOLET);
         }
         if (i == 5) {
@@ -252,7 +252,7 @@ static void draw_header() {
     draw_topbar();
     draw_sidebar();
     int cx=SIDEBAR_W+PADDING, cw=(int)W-SIDEBAR_W-PADDING*2;
-    Framebuffer::draw_rect(cx,TOPBAR_H+PADDING,cw,50,0x0D0530);
+    Framebuffer::draw_rounded_rect(cx,TOPBAR_H+PADDING,cw,50,14,0x0D0530);
     for(int x=cx;x<cx+cw;x++){
         uint32_t t=(x-cx)*255/cw,r=(0*(255-t)+255*t)/255,g=(229*(255-t)+0*t)/255,b=(255*(255-t)+128*t)/255;
         Framebuffer::put_pixel(x,TOPBAR_H+PADDING,(r<<16)|(g<<8)|b);
@@ -290,8 +290,7 @@ static void draw_file_list() {
     int cx = SIDEBAR_W + PADDING;
     int cw = (int)fb.width - SIDEBAR_W - PADDING*2;
 
-    Framebuffer::draw_rect(cx, TOPBAR_H+PADDING, cw, 280, 0x0A0525);
-    Framebuffer::draw_rect(cx, TOPBAR_H+PADDING, cw, 1, CLR_CYAN);
+    Framebuffer::draw_rounded_rect(cx, TOPBAR_H+PADDING, cw, 280, 14, 0x0A0525);
     Framebuffer::print_at("Nova Files", cx+10, TOPBAR_H+PADDING+10, CLR_CYAN);
     Framebuffer::print_at("Arrows: navigate | Enter: open | Esc: back",
                           cx+10, TOPBAR_H+PADDING+26, CLR_DIM);
@@ -326,8 +325,7 @@ static void draw_file_viewer() {
     int cx = SIDEBAR_W + PADDING;
     int cw = (int)fb.width - SIDEBAR_W - PADDING*2;
 
-    Framebuffer::draw_rect(cx, TOPBAR_H+PADDING, cw, 280, 0x0A0525);
-    Framebuffer::draw_rect(cx, TOPBAR_H+PADDING, cw, 1, CLR_PINK);
+    Framebuffer::draw_rounded_rect(cx, TOPBAR_H+PADDING, cw, 280, 14, 0x0A0525);
 
     static char view_buf[2048];
     uint32_t view_size = 0;
@@ -368,8 +366,7 @@ static void draw_docs_editor() {
     int cx = SIDEBAR_W + PADDING;
     int cw = (int)fb.width - SIDEBAR_W - PADDING*2;
 
-    Framebuffer::draw_rect(cx, TOPBAR_H+PADDING, cw, 320, 0x0A0525);
-    Framebuffer::draw_rect(cx, TOPBAR_H+PADDING, cw, 1, CLR_PINK);
+    Framebuffer::draw_rounded_rect(cx, TOPBAR_H+PADDING, cw, 320, 14, 0x0A0525);
     Framebuffer::print_at("Nova Docs", cx+10, TOPBAR_H+PADDING+10, CLR_PINK);
     Framebuffer::print_at(doc_filename, cx+110, TOPBAR_H+PADDING+10, CLR_DIM);
     Framebuffer::print_at("F2: save | Esc: back to sidebar",
@@ -430,8 +427,7 @@ static void open_docs_panel() {
 static void open_panel(const char* title, uint32_t tcol, const char* line1, const char* line2) {
     Framebuffer::Info& fb=Framebuffer::get_info();
     int cx=SIDEBAR_W+PADDING, cw=(int)fb.width-SIDEBAR_W-PADDING*2;
-    Framebuffer::draw_rect(cx,TOPBAR_H+PADDING,cw,120,0x080320);
-    Framebuffer::draw_rect(cx,TOPBAR_H+PADDING,cw,1,tcol);
+    Framebuffer::draw_rounded_rect(cx,TOPBAR_H+PADDING,cw,120,14,0x080320);
     Framebuffer::print_at(title,cx+10,TOPBAR_H+PADDING+10,tcol);
     Framebuffer::print_at(line1,cx+10,TOPBAR_H+PADDING+32,CLR_DIM);
     Framebuffer::print_at(line2,cx+10,TOPBAR_H+PADDING+48,CLR_GRAY);

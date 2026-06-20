@@ -1,3 +1,4 @@
+#include "font8x16.h"
 #include "framebuffer.h"
 #include <stdint.h>
 
@@ -165,6 +166,29 @@ void Framebuffer::draw_circle(int cx, int cy, int r, uint32_t color) {
                 put_pixel(cx+x, cy+y, color);
 }
 
+void Framebuffer::draw_rounded_rect(int x, int y, int w, int h, int radius, uint32_t color) {
+    if (radius > w/2) radius = w/2;
+    if (radius > h/2) radius = h/2;
+    int r2 = radius * radius;
+
+    for (int row = 0; row < h; row++) {
+        for (int col = 0; col < w; col++) {
+            // Determine which corner zone (if any) this pixel falls in
+            int cx = -1, cy = -1; // corner center, relative to this pixel
+            if (col < radius && row < radius) { cx = radius; cy = radius; }
+            else if (col >= w-radius && row < radius) { cx = w-radius-1; cy = radius; }
+            else if (col < radius && row >= h-radius) { cx = radius; cy = h-radius-1; }
+            else if (col >= w-radius && row >= h-radius) { cx = w-radius-1; cy = h-radius-1; }
+
+            if (cx >= 0) {
+                int dx = col - cx, dy = row - cy;
+                if (dx*dx + dy*dy > r2) continue; // outside the rounded corner, skip
+            }
+            put_pixel(x + col, y + row, color);
+        }
+    }
+}
+
 void Framebuffer::draw_line(int x0, int y0, int x1, int y1, uint32_t color) {
     int dx = x1-x0 < 0 ? x0-x1 : x1-x0;
     int dy = y1-y0 < 0 ? y0-y1 : y1-y0;
@@ -180,13 +204,45 @@ void Framebuffer::draw_line(int x0, int y0, int x1, int y1, uint32_t color) {
     }
 }
 
+static inline uint32_t blend_half(uint32_t fg, uint32_t bg) {
+    uint32_t fr=(fg>>16)&0xFF, fgc=(fg>>8)&0xFF, fb2=fg&0xFF;
+    uint32_t br=(bg>>16)&0xFF, bgc=(bg>>8)&0xFF, bb=bg&0xFF;
+    uint32_t r=(fr+br)/2, g=(fgc+bgc)/2, b=(fb2+bb)/2;
+    return (r<<16)|(g<<8)|b;
+}
+
 void Framebuffer::draw_char(char c, int x, int y, uint32_t color) {
     if ((unsigned char)c < 32 || (unsigned char)c > 127) return;
-    const uint8_t* glyph = font[c - 32];
-    for (int row = 0; row < 8; row++) {
+    const uint8_t* glyph = font8x16[c - 32];
+
+    // First pass: plot all solid pixels
+    bool lit[16][8] = {};
+    for (int row = 0; row < 16; row++) {
         for (int col = 0; col < 8; col++) {
-            if (glyph[row] & (0x01 << col))
+            if (glyph[row] & (0x80 >> col)) {
+                lit[row][col] = true;
                 put_pixel(x + col, y + row, color);
+            }
+        }
+    }
+
+    // Second pass: lightly blend diagonal neighbors of lit pixels that are
+    // themselves unlit, softening jagged edges without needing real alpha data
+    for (int row = 0; row < 16; row++) {
+        for (int col = 0; col < 8; col++) {
+            if (lit[row][col]) continue;
+            int neighbors = 0;
+            if (row>0 && col>0 && lit[row-1][col-1]) neighbors++;
+            if (row>0 && col<7 && lit[row-1][col+1]) neighbors++;
+            if (row<15 && col>0 && lit[row+1][col-1]) neighbors++;
+            if (row<15 && col<7 && lit[row+1][col+1]) neighbors++;
+            if (neighbors >= 2) {
+                // Read existing background pixel color isn't trivial without a
+                // framebuffer read-back helper, so approximate with a fixed
+                // dark blend toward the glyph color for a soft anti-aliased look
+                uint32_t soft = blend_half(color, 0x000000);
+                put_pixel(x + col, y + row, soft);
+            }
         }
     }
 }
