@@ -189,6 +189,25 @@ void Framebuffer::draw_rounded_rect(int x, int y, int w, int h, int radius, uint
     }
 }
 
+void Framebuffer::draw_rect_round_br(int x, int y, int w, int h, int radius, uint32_t color) {
+    // Rounds only the bottom-right corner; all other edges stay sharp.
+    // Useful for panels anchored to a screen edge (sidebar, topbar, etc).
+    if (radius > w/2) radius = w/2;
+    if (radius > h/2) radius = h/2;
+    int r2 = radius * radius;
+    int cx = w - radius - 1, cy = h - radius - 1;
+
+    for (int row = 0; row < h; row++) {
+        for (int col = 0; col < w; col++) {
+            if (col >= w-radius && row >= h-radius) {
+                int dx = col - cx, dy = row - cy;
+                if (dx*dx + dy*dy > r2) continue;
+            }
+            put_pixel(x + col, y + row, color);
+        }
+    }
+}
+
 void Framebuffer::draw_line(int x0, int y0, int x1, int y1, uint32_t color) {
     int dx = x1-x0 < 0 ? x0-x1 : x1-x0;
     int dy = y1-y0 < 0 ? y0-y1 : y1-y0;

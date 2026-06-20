@@ -190,7 +190,7 @@ static void draw_topbar() {
 static void draw_sidebar() {
     Framebuffer::Info& fb = Framebuffer::get_info();
     uint32_t H = fb.height;
-    Framebuffer::draw_rect(0,TOPBAR_H,SIDEBAR_W,H-TOPBAR_H,0x08031E);
+    Framebuffer::draw_rect_round_br(0,TOPBAR_H,SIDEBAR_W,(int)(H-TOPBAR_H),16,0x08031E);
     Framebuffer::draw_rect(SIDEBAR_W-1,TOPBAR_H,1,H-TOPBAR_H,0x1A0855);
 
     struct Nav { const char* label; const char* sub; uint32_t col; bool active; };
