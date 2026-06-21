@@ -21,13 +21,9 @@ stack_top:
 
 section .text
 _start:
-    ; eax = 0x2BADB002 (multiboot magic)
-    ; ebx = multiboot info pointer
-    ; Do NOT touch ebx or eax until after we set up stack
-
-    mov esp, stack_top      ; set up stack first
-    push eax                ; push magic   (2nd arg)
-    push ebx                ; push mbi ptr (1st arg)
+    mov esp, stack_top
+    push eax
+    push ebx
     call kernel_main
     cli
 .hang:
