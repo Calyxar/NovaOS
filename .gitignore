@@ -1,4 +1,10 @@
 build/
+
 *.swp
 *.swo
 .Makefile.swp
+
+*.o
+*.bin
+*.iso
+*.img

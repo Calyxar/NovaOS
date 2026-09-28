@@ -22,6 +22,8 @@ namespace Framebuffer {
     void     draw_rounded_rect(int x, int y, int w, int h, int radius, uint32_t color);
     void     draw_rect_round_br(int x, int y, int w, int h, int radius, uint32_t color);
     void     draw_circle(int cx, int cy, int r, uint32_t color);
+    void     draw_circle_aa(int cx, int cy, int r, uint32_t color);
+    uint32_t get_pixel(int x, int y);
     void     draw_line(int x0, int y0, int x1, int y1, uint32_t color);
     void     print(const char* str, uint32_t color = 0xFFFFFF);
     void     print_at(const char* str, int x, int y, uint32_t color);

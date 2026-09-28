@@ -141,6 +141,49 @@ void Framebuffer::put_pixel(int x, int y, uint32_t color) {
     row[x] = color;
 }
 
+uint32_t Framebuffer::get_pixel(int x, int y) {
+    if (!fb.addr || x < 0 || y < 0 || (uint32_t)x >= fb.width || (uint32_t)y >= fb.height) return 0;
+    uint32_t* row = (uint32_t*)((uint8_t*)fb.addr + y * fb.pitch);
+    return row[x];
+}
+
+static inline uint32_t blend_colors(uint32_t fg, uint32_t bg, uint32_t alpha255) {
+    uint32_t fr=(fg>>16)&0xFF, fgc=(fg>>8)&0xFF, fb2=fg&0xFF;
+    uint32_t br=(bg>>16)&0xFF, bgc=(bg>>8)&0xFF, bb=bg&0xFF;
+    uint32_t r = (fr*alpha255 + br*(255-alpha255)) / 255;
+    uint32_t g = (fgc*alpha255 + bgc*(255-alpha255)) / 255;
+    uint32_t b = (fb2*alpha255 + bb*(255-alpha255)) / 255;
+    return (r<<16)|(g<<8)|b;
+}
+
+void Framebuffer::draw_circle_aa(int cx, int cy, int r, uint32_t color) {
+    // Anti-aliased filled circle: pixels fully inside the radius are drawn
+    // solid; pixels in the outer ~1px ring are blended with whatever is
+    // already on screen, based on how far they sit past the true edge.
+    int rOuter = r + 1;
+    for (int y = -rOuter; y <= rOuter; y++) {
+        for (int x = -rOuter; x <= rOuter; x++) {
+            // distance from center, in fixed point (x100) for sub-pixel precision
+            int distSq = x*x + y*y;
+            int rSq = r*r;
+            if (distSq <= rSq) {
+                put_pixel(cx+x, cy+y, color);
+            } else {
+                // Compute approximate distance using integer sqrt and check
+                // if we're within ~1px of the true edge for a soft blend
+                uint32_t dist = 1;
+                for (uint32_t s = 1; s*s <= (uint32_t)distSq; s++) dist = s;
+                int over = (int)dist - r;
+                if (over >= 0 && over <= 1) {
+                    uint32_t alpha = over == 0 ? 160 : 60; // soft falloff
+                    uint32_t bg = get_pixel(cx+x, cy+y);
+                    put_pixel(cx+x, cy+y, blend_colors(color, bg, alpha));
+                }
+            }
+        }
+    }
+}
+
 void Framebuffer::clear(uint32_t color) {
     if (!vesa_mode) {
         for (int i = 0; i < 80*25; i++) vga_buf[i] = 0x0F00 | ' ';

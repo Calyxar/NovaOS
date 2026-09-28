@@ -165,9 +165,9 @@ static void draw_topbar() {
         uint32_t r=(0*(255-t)+123*t)/255, g=(229*(255-t)+47*t)/255, b=(255*(255-t)+247*t)/255;
         Framebuffer::put_pixel(x,TOPBAR_H-1,(r<<16)|(g<<8)|b);
     }
-    Framebuffer::draw_circle(16,18,5,CLR_VIOLET);
-    Framebuffer::draw_circle(16,18,3,CLR_CYAN);
-    Framebuffer::draw_circle(16,18,1,CLR_WHITE);
+    Framebuffer::draw_circle_aa(16,18,5,CLR_VIOLET);
+    Framebuffer::draw_circle_aa(16,18,3,CLR_CYAN);
+    Framebuffer::draw_circle_aa(16,18,1,CLR_WHITE);
     Framebuffer::print_at("NovaOS",28,14,CLR_CYAN);
     Framebuffer::print_at("[1-8: nav]",420,14,CLR_DIM);
     Framebuffer::print_at("Home",110,14,CLR_WHITE);
@@ -187,34 +187,35 @@ static void draw_topbar() {
 #define SIDEBAR_ROW_H 50
 #define SIDEBAR_TOP   (TOPBAR_H + 10)
 
+static int current_nav = 4; // Terminal is the default screen on boot
 static void draw_sidebar() {
     Framebuffer::Info& fb = Framebuffer::get_info();
     uint32_t H = fb.height;
     Framebuffer::draw_rect_round_br(0,TOPBAR_H,SIDEBAR_W,(int)(H-TOPBAR_H),16,0x08031E);
     Framebuffer::draw_rect(SIDEBAR_W-1,TOPBAR_H,1,H-TOPBAR_H,0x1A0855);
 
-    struct Nav { const char* label; const char* sub; uint32_t col; bool active; };
+    struct Nav { const char* label; const char* sub; uint32_t col; };
     Nav items[] = {
-        {"Dashboard",    "Home screen",    CLR_CYAN,   true},
-        {"Nova Browser", "Browse the web", CLR_CYAN,   false},
-        {"Nova Docs",    "Office suite",   CLR_PINK,   false},
-        {"Game Mode",    "Launch games",   CLR_PINK,   false},
-        {"Terminal",     "Nova Shell",     CLR_VIOLET, true},
-        {"Nova Files",   "NovaFS",         CLR_DIM,    false},
-        {"Nova Store",   "Apps",           CLR_DIM,    false},
-        {"Settings",     "CPU/GPU/RAM",    CLR_DIM,    false},
+        {"Dashboard",    "Home screen",    CLR_CYAN},
+        {"Nova Browser", "Browse the web", CLR_CYAN},
+        {"Nova Docs",    "Office suite",   CLR_PINK},
+        {"Game Mode",    "Launch games",   CLR_PINK},
+        {"Terminal",     "Nova Shell",     CLR_VIOLET},
+        {"Nova Files",   "NovaFS",         CLR_DIM},
+        {"Nova Store",   "Apps",           CLR_DIM},
+        {"Settings",     "CPU/GPU/RAM",    CLR_DIM},
     };
 
     for (int i = 0; i < 8; i++) {
         int top = SIDEBAR_TOP + i * SIDEBAR_ROW_H;
-        if (items[i].active) {
+        if (i == current_nav) {
             Framebuffer::draw_rounded_rect(2, top+2, SIDEBAR_W-6, SIDEBAR_ROW_H-4, 12, 0x1A0844);
             Framebuffer::draw_rect(2, top+2, 2, SIDEBAR_ROW_H-4, CLR_VIOLET);
         }
         if (i == 5) {
             Framebuffer::draw_rect(12, top-6, SIDEBAR_W-24, 1, 0x1A0855);
         }
-        Framebuffer::draw_circle(20, top+18, 4, items[i].col);
+        Framebuffer::draw_circle_aa(20, top+18, 4, items[i].col);
         Framebuffer::print_at(items[i].label, 32, top+12, CLR_WHITE);
         Framebuffer::print_at(items[i].sub,   32, top+24, CLR_GRAY);
     }
@@ -301,7 +302,7 @@ static void draw_file_list() {
         if (sel) {
             Framebuffer::draw_rect(cx+8, ly-2, cw-16, 16, 0x1A0855);
         }
-        Framebuffer::draw_circle(cx+18, ly+5, 3, sel ? CLR_CYAN : CLR_DIM);
+        Framebuffer::draw_circle_aa(cx+18, ly+5, 3, sel ? CLR_CYAN : CLR_DIM);
         Framebuffer::print_at(file_names[i], cx+30, ly, sel ? CLR_WHITE : CLR_DIM);
 
         char sbuf[16]; int si=0;
@@ -531,6 +532,7 @@ void Shell::init() {
 
 // ---> EXTRACTED HELPER FUNCTION <---
 static void execute_nav(int hit) {
+    current_nav = hit;
     if (hit != 2) docs_panel_active = false;
     if (hit == 0) {
         files_panel_active = false; file_viewer_active = false;
