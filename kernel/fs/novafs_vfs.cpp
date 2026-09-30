@@ -30,9 +30,8 @@ static void clear_text(
     char* dst,
     int max
 ) {
-    for (int i = 0; i < max; ++i) {
+    for (int i = 0; i < max; ++i)
         dst[i] = '\0';
-    }
 }
 
 
@@ -81,13 +80,6 @@ static int novafs_read(
     size_t offset
 );
 
-static int novafs_write(
-    VNode* node,
-    uint8_t* buffer,
-    size_t size,
-    size_t offset
-);
-
 
 // =============================================================
 // Directory listing state
@@ -106,7 +98,7 @@ static DirectoryLookupState lookupState;
 
 
 // =============================================================
-// Read file
+// File read
 // =============================================================
 
 static int novafs_read(
@@ -185,159 +177,6 @@ static int novafs_read(
 
 
 // =============================================================
-// Write file
-// =============================================================
-
-static int novafs_write(
-    VNode* node,
-    uint8_t* buffer,
-    size_t size,
-    size_t offset
-) {
-    if (!node || !buffer)
-        return -1;
-
-
-    if (
-        (node->flags & VFS_NODE_FILE) == 0
-    ) {
-        return -1;
-    }
-
-
-    constexpr uint32_t MAX_SIZE =
-        NOVAFS_MAX_FILE_SECTORS * 512;
-
-
-    if (offset > MAX_SIZE)
-        return -1;
-
-
-    char temp[MAX_SIZE + 1];
-
-
-    for (
-        uint32_t i = 0;
-        i <= MAX_SIZE;
-        ++i
-    ) {
-        temp[i] = '\0';
-    }
-
-
-    uint32_t existingSize = 0;
-
-
-    uint32_t parent =
-        (uint32_t)(uintptr_t)
-        node->fs_data;
-
-
-    // ---------------------------------------------------------
-    // Preserve existing contents when needed
-    // ---------------------------------------------------------
-
-    if (node->size > 0) {
-        if (
-            !NovaFSDisk::load_file_in(
-                parent,
-                node->name,
-                temp,
-                MAX_SIZE + 1,
-                &existingSize
-            )
-        ) {
-            return -1;
-        }
-    }
-
-
-    // ---------------------------------------------------------
-    // Clamp write to NovaFS file limit
-    // ---------------------------------------------------------
-
-    if (
-        offset + size >
-        MAX_SIZE
-    ) {
-        size =
-            MAX_SIZE -
-            offset;
-    }
-
-
-    // ---------------------------------------------------------
-    // Copy data
-    // ---------------------------------------------------------
-
-    for (
-        uint32_t i = 0;
-        i < size;
-        ++i
-    ) {
-        temp[offset + i] =
-            (char)buffer[i];
-    }
-
-
-    uint32_t endPosition =
-        (uint32_t)offset +
-        (uint32_t)size;
-
-
-    uint32_t finalSize;
-
-
-    // Writing from position 0 is treated as replacing
-    // the entire file. This is useful for the text editor.
-    if (offset == 0) {
-        finalSize =
-            endPosition;
-    }
-
-    else {
-        finalSize =
-            existingSize;
-
-        if (
-            endPosition >
-            finalSize
-        ) {
-            finalSize =
-                endPosition;
-        }
-    }
-
-
-    temp[finalSize] =
-        '\0';
-
-
-    // ---------------------------------------------------------
-    // Save back to NovaFS
-    // ---------------------------------------------------------
-
-    if (
-        !NovaFSDisk::save_file_in(
-            parent,
-            node->name,
-            temp,
-            finalSize
-        )
-    ) {
-        return -1;
-    }
-
-
-    node->size =
-        finalSize;
-
-
-    return (int)size;
-}
-
-
-// =============================================================
 // Convert NovaFS entry to VNode
 // =============================================================
 
@@ -361,7 +200,7 @@ static VNode* make_vnode(
         true;
 
 
-    // Clear reused node
+    // Clear old state because VNodes are reused.
     clear_text(
         node->name,
         256
@@ -389,7 +228,7 @@ static VNode* make_vnode(
 
 
     // ---------------------------------------------------------
-    // Common data
+    // Common entry information
     // ---------------------------------------------------------
 
     copy_text(
@@ -407,6 +246,7 @@ static VNode* make_vnode(
         entry.size;
 
 
+    // Remember the actual NovaFS parent.
     node->fs_data =
         (void*)(uintptr_t)
         entry.parent;
@@ -451,7 +291,7 @@ static VNode* make_vnode(
 
 
         node->write =
-            novafs_write;
+            nullptr;
 
 
         node->readdir =
@@ -570,7 +410,7 @@ static FindDirState findState;
 
 
 // =============================================================
-// String comparison
+// String compare
 // =============================================================
 
 static bool same_text(
@@ -686,7 +526,7 @@ static VNode* novafs_create(
         return nullptr;
 
 
-    // Prevent duplicate names
+    // Don't allow duplicates.
     if (
         directory->finddir &&
         directory->finddir(
@@ -714,8 +554,8 @@ static VNode* novafs_create(
     }
 
 
-    const char* emptyData =
-        "";
+    // Create an empty file.
+    const char* emptyData = "";
 
 
     if (
@@ -730,6 +570,8 @@ static VNode* novafs_create(
     }
 
 
+    // Look it up again so we can return
+    // its new VNode.
     return novafs_finddir(
         directory,
         name

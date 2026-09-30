@@ -4,6 +4,7 @@
 #include "../core/cursor.h"
 #include "../pages/home.h"
 #include "../pages/apps.h"
+#include "../pages/files.h"
 #include "../theme/colors.h"
 
 #include "../../kernel/drivers/video/framebuffer.h"
@@ -16,6 +17,7 @@ static DesktopPage currentPage =
 
 void Desktop::init() {
     Sidebar::init();
+    FilesPage::init();
     Cursor::init();
 
     draw();
@@ -67,42 +69,66 @@ void Desktop::run() {
             mouse.y != previousY;
 
         if (moved) {
-            Cursor::restore();
+    Cursor::restore();
 
-            Sidebar::handle_hover(
-                mouse.x,
-                mouse.y
-            );
+    Sidebar::handle_hover(
+        mouse.x,
+        mouse.y
+    );
 
-            Cursor::move_to(
-                mouse.x,
-                mouse.y
-            );
+    if (
+        currentPage ==
+        DesktopPage::Files
+    ) {
+        FilesPage::handle_hover(
+            mouse.x,
+            mouse.y
+        );
 
-            Cursor::draw();
+        draw();
+    }
 
-            previousX = mouse.x;
-            previousY = mouse.y;
-        }
+    Cursor::move_to(
+        mouse.x,
+        mouse.y
+    );
+
+    Cursor::draw();
+
+    previousX = mouse.x;
+    previousY = mouse.y;
+}
 
         if (
-            mouse.left &&
-            !previousLeft
-        ) {
-            Cursor::restore();
+    mouse.left &&
+    !previousLeft
+) {
+    Cursor::restore();
 
-            Sidebar::handle_click(
-                mouse.x,
-                mouse.y
-            );
+    Sidebar::handle_click(
+        mouse.x,
+        mouse.y
+    );
 
-            Cursor::move_to(
-                mouse.x,
-                mouse.y
-            );
+    if (
+        currentPage ==
+        DesktopPage::Files
+    ) {
+        FilesPage::handle_click(
+            mouse.x,
+            mouse.y
+        );
 
-            Cursor::draw();
-        }
+        draw();
+    }
+
+    Cursor::move_to(
+        mouse.x,
+        mouse.y
+    );
+
+    Cursor::draw();
+}
 
         previousLeft =
             mouse.left;
@@ -167,12 +193,8 @@ void Desktop::draw() {
             break;
 
         case DesktopPage::Files:
-            Framebuffer::print_at(
-                "Files",
-                190,
-                72,
-                NovaColors::TextPrimary
-            );
+                FilesPage::draw();
+                break;
 
             Framebuffer::print_at(
                 "Browse NovaFS",

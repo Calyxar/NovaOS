@@ -11,8 +11,10 @@
 #include "drivers/disk/ata.h"
 
 #include "fs/vfs.h"
+#include "fs/novafs_vfs.h"
 #include "fs/ramfs.h"
 #include "fs/novafs_disk.h"
+#include "fs/novafs_setup.h"
 
 #include "ipc/ipc.h"
 #include "syscall/syscall.h"
@@ -297,6 +299,94 @@ extern "C" void kernel_main(
 
     serial_print("Init VFS\n");
     VFS::init();
+
+    serial_print("Mount NovaFS at /\n");
+
+    if (NovaFSVFS::mount_root()) {
+        serial_print("NovaFS mounted at /\n");
+    } else {
+        serial_print("ERROR: NovaFS mount failed\n");
+    }
+
+    serial_print("Creating NovaFS default layout\n");
+    NovaFSSetup::create_default_layout();
+
+NovaFSDisk::create_directory(
+    NOVAFS_ROOT_PARENT,
+    "System"
+);
+
+NovaFSDisk::create_directory(
+    NOVAFS_ROOT_PARENT,
+    "Users"
+);
+
+NovaFSDisk::create_directory(
+    NOVAFS_ROOT_PARENT,
+    "Apps"
+);
+
+NovaFSDisk::create_directory(
+    NOVAFS_ROOT_PARENT,
+    "Documents"
+);
+
+NovaFSDisk::create_directory(
+    NOVAFS_ROOT_PARENT,
+    "Downloads"
+);
+
+NovaFSDisk::create_directory(
+    NOVAFS_ROOT_PARENT,
+    "Temp"
+);
+
+int systemDir =
+    NovaFSDisk::find_directory(
+        NOVAFS_ROOT_PARENT,
+        "System"
+    );
+
+int usersDir =
+    NovaFSDisk::find_directory(
+        NOVAFS_ROOT_PARENT,
+        "Users"
+    );
+
+int documentsDir =
+    NovaFSDisk::find_directory(
+        NOVAFS_ROOT_PARENT,
+        "Documents"
+    );
+
+    if (systemDir >= 0) {
+    NovaFSDisk::create_directory(
+        (uint32_t)systemDir,
+        "Drivers"
+    );
+
+    NovaFSDisk::create_directory(
+        (uint32_t)systemDir,
+        "Config"
+    );
+
+    NovaFSDisk::create_directory(
+        (uint32_t)systemDir,
+        "Logs"
+    );
+}
+
+if (documentsDir >= 0) {
+    NovaFSDisk::create_directory(
+        (uint32_t)documentsDir,
+        "Projects"
+    );
+
+    NovaFSDisk::create_directory(
+        (uint32_t)documentsDir,
+        "Notes"
+    );
+}
 
     // ------------------------------------------------
     // IPC
