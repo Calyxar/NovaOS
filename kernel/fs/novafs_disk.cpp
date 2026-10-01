@@ -1,579 +1,24 @@
-#include "novafs_vfs.h"
-
 #include "novafs_disk.h"
 
-
-// =============================================================
-// Configuration
-// =============================================================
-
-static constexpr int MAX_VNODES =
-    NOVAFS_MAX_FILES + 1;
+#include "../drivers/disk/ata.h"
 
 
 // =============================================================
-// VNode storage
+// NovaFS state
 // =============================================================
 
-static VNode nodes[MAX_VNODES];
+static NovaFSSuperblock sb;
 
-static bool nodeUsed[MAX_VNODES];
+static NovaFSEntry entries[NOVAFS_MAX_FILES];
 
-static VNode rootNode;
-
-
-// =============================================================
-// Helpers
-// =============================================================
-
-static void clear_text(
-    char* dst,
-    int max
-) {
-    for (int i = 0; i < max; ++i) {
-        dst[i] = '\0';
-    }
-}
-
-
-static void copy_text(
-    char* dst,
-    const char* src,
-    int max
-) {
-    int i = 0;
-
-    while (
-        src[i] &&
-        i < max - 1
-    ) {
-        dst[i] = src[i];
-        ++i;
-    }
-
-    dst[i] = '\0';
-}
+static bool mounted = false;
 
 
 // =============================================================
-// Forward declarations
+// String helpers
 // =============================================================
 
-static VNode* novafs_readdir(
-    VNode* node,
-    uint32_t index
-);
-
-static VNode* novafs_finddir(
-    VNode* node,
-    const char* name
-);
-
-static VNode* novafs_create(
-    VNode* directory,
-    const char* name
-);
-
-static int novafs_read(
-    VNode* node,
-    uint8_t* buffer,
-    size_t size,
-    size_t offset
-);
-
-static int novafs_write(
-    VNode* node,
-    uint8_t* buffer,
-    size_t size,
-    size_t offset
-);
-
-
-// =============================================================
-// Directory listing state
-// =============================================================
-
-struct DirectoryLookupState {
-    uint32_t parent;
-    uint32_t wantedIndex;
-    uint32_t currentIndex;
-
-    VNode* result;
-};
-
-
-static DirectoryLookupState lookupState;
-
-
-// =============================================================
-// Read file
-// =============================================================
-
-static int novafs_read(
-    VNode* node,
-    uint8_t* buffer,
-    size_t size,
-    size_t offset
-) {
-    if (!node || !buffer)
-        return -1;
-
-
-    if (
-        (node->flags & VFS_NODE_FILE) == 0
-    ) {
-        return -1;
-    }
-
-
-    if (offset >= node->size)
-        return 0;
-
-
-    char temp[
-        NOVAFS_MAX_FILE_SECTORS * 512 + 1
-    ];
-
-
-    uint32_t loadedSize = 0;
-
-
-    uint32_t parent =
-        (uint32_t)(uintptr_t)
-        node->fs_data;
-
-
-    if (
-        !NovaFSDisk::load_file_in(
-            parent,
-            node->name,
-            temp,
-            sizeof(temp),
-            &loadedSize
-        )
-    ) {
-        return -1;
-    }
-
-
-    if (offset >= loadedSize)
-        return 0;
-
-
-    uint32_t available =
-        loadedSize - offset;
-
-
-    uint32_t toCopy =
-        size < available
-            ? (uint32_t)size
-            : available;
-
-
-    for (
-        uint32_t i = 0;
-        i < toCopy;
-        ++i
-    ) {
-        buffer[i] =
-            (uint8_t)temp[offset + i];
-    }
-
-
-    return (int)toCopy;
-}
-
-
-// =============================================================
-// Write file
-// =============================================================
-
-static int novafs_write(
-    VNode* node,
-    uint8_t* buffer,
-    size_t size,
-    size_t offset
-) {
-    if (!node || !buffer)
-        return -1;
-
-
-    if (
-        (node->flags & VFS_NODE_FILE) == 0
-    ) {
-        return -1;
-    }
-
-
-    constexpr uint32_t MAX_SIZE =
-        NOVAFS_MAX_FILE_SECTORS * 512;
-
-
-    if (offset > MAX_SIZE)
-        return -1;
-
-
-    char temp[MAX_SIZE + 1];
-
-
-    for (
-        uint32_t i = 0;
-        i <= MAX_SIZE;
-        ++i
-    ) {
-        temp[i] = '\0';
-    }
-
-
-    uint32_t existingSize = 0;
-
-
-    uint32_t parent =
-        (uint32_t)(uintptr_t)
-        node->fs_data;
-
-
-    // ---------------------------------------------------------
-    // Preserve existing contents when needed
-    // ---------------------------------------------------------
-
-    if (node->size > 0) {
-        if (
-            !NovaFSDisk::load_file_in(
-                parent,
-                node->name,
-                temp,
-                MAX_SIZE + 1,
-                &existingSize
-            )
-        ) {
-            return -1;
-        }
-    }
-
-
-    // ---------------------------------------------------------
-    // Clamp write to NovaFS file limit
-    // ---------------------------------------------------------
-
-    if (
-        offset + size >
-        MAX_SIZE
-    ) {
-        size =
-            MAX_SIZE -
-            offset;
-    }
-
-
-    // ---------------------------------------------------------
-    // Copy data
-    // ---------------------------------------------------------
-
-    for (
-        uint32_t i = 0;
-        i < size;
-        ++i
-    ) {
-        temp[offset + i] =
-            (char)buffer[i];
-    }
-
-
-    uint32_t endPosition =
-        (uint32_t)offset +
-        (uint32_t)size;
-
-
-    uint32_t finalSize;
-
-
-    // Writing from position 0 is treated as replacing
-    // the entire file. This is useful for the text editor.
-    if (offset == 0) {
-        finalSize =
-            endPosition;
-    }
-
-    else {
-        finalSize =
-            existingSize;
-
-        if (
-            endPosition >
-            finalSize
-        ) {
-            finalSize =
-                endPosition;
-        }
-    }
-
-
-    temp[finalSize] =
-        '\0';
-
-
-    // ---------------------------------------------------------
-    // Save back to NovaFS
-    // ---------------------------------------------------------
-
-    if (
-        !NovaFSDisk::save_file_in(
-            parent,
-            node->name,
-            temp,
-            finalSize
-        )
-    ) {
-        return -1;
-    }
-
-
-    node->size =
-        finalSize;
-
-
-    return (int)size;
-}
-
-
-// =============================================================
-// Convert NovaFS entry to VNode
-// =============================================================
-
-static VNode* make_vnode(
-    const NovaFSEntry& entry,
-    uint32_t entryIndex
-) {
-    if (
-        entryIndex >=
-        NOVAFS_MAX_FILES
-    ) {
-        return nullptr;
-    }
-
-
-    VNode* node =
-        &nodes[entryIndex];
-
-
-    nodeUsed[entryIndex] =
-        true;
-
-
-    // Clear reused node
-    clear_text(
-        node->name,
-        256
-    );
-
-
-    node->inode = 0;
-    node->size = 0;
-    node->flags = 0;
-
-    node->uid = 0;
-    node->gid = 0;
-
-    node->fs_data = nullptr;
-
-    node->read = nullptr;
-    node->write = nullptr;
-
-    node->open = nullptr;
-    node->close = nullptr;
-
-    node->readdir = nullptr;
-    node->finddir = nullptr;
-    node->create = nullptr;
-
-
-    // ---------------------------------------------------------
-    // Common data
-    // ---------------------------------------------------------
-
-    copy_text(
-        node->name,
-        entry.name,
-        256
-    );
-
-
-    node->inode =
-        entryIndex;
-
-
-    node->size =
-        entry.size;
-
-
-    node->fs_data =
-        (void*)(uintptr_t)
-        entry.parent;
-
-
-    // ---------------------------------------------------------
-    // Directory
-    // ---------------------------------------------------------
-
-    if (
-        entry.type ==
-        NOVAFS_ENTRY_DIRECTORY
-    ) {
-        node->flags =
-            VFS_NODE_DIRECTORY;
-
-
-        node->readdir =
-            novafs_readdir;
-
-
-        node->finddir =
-            novafs_finddir;
-
-
-        node->create =
-            novafs_create;
-    }
-
-
-    // ---------------------------------------------------------
-    // File
-    // ---------------------------------------------------------
-
-    else {
-        node->flags =
-            VFS_NODE_FILE;
-
-
-        node->read =
-            novafs_read;
-
-
-        node->write =
-            novafs_write;
-
-
-        node->readdir =
-            nullptr;
-
-
-        node->finddir =
-            nullptr;
-
-
-        node->create =
-            nullptr;
-    }
-
-
-    return node;
-}
-
-
-// =============================================================
-// readdir callback
-// =============================================================
-
-static void readdir_callback(
-    const NovaFSEntry& entry,
-    uint32_t index
-) {
-    if (lookupState.result)
-        return;
-
-
-    if (
-        lookupState.currentIndex ==
-        lookupState.wantedIndex
-    ) {
-        lookupState.result =
-            make_vnode(
-                entry,
-                index
-            );
-
-        return;
-    }
-
-
-    ++lookupState.currentIndex;
-}
-
-
-// =============================================================
-// readdir
-// =============================================================
-
-static VNode* novafs_readdir(
-    VNode* node,
-    uint32_t index
-) {
-    if (!node)
-        return nullptr;
-
-
-    uint32_t parent;
-
-
-    if (
-        node == &rootNode
-    ) {
-        parent =
-            NOVAFS_ROOT_PARENT;
-    }
-
-    else {
-        parent =
-            node->inode;
-    }
-
-
-    lookupState.parent =
-        parent;
-
-
-    lookupState.wantedIndex =
-        index;
-
-
-    lookupState.currentIndex =
-        0;
-
-
-    lookupState.result =
-        nullptr;
-
-
-    NovaFSDisk::list_directory(
-        parent,
-        readdir_callback
-    );
-
-
-    return lookupState.result;
-}
-
-
-// =============================================================
-// finddir state
-// =============================================================
-
-struct FindDirState {
-    const char* name;
-
-    VNode* result;
-};
-
-
-static FindDirState findState;
-
-
-// =============================================================
-// String comparison
-// =============================================================
-
-static bool same_text(
+static bool streq(
     const char* a,
     const char* b
 ) {
@@ -589,247 +34,903 @@ static bool same_text(
 }
 
 
-// =============================================================
-// finddir callback
-// =============================================================
-
-static void finddir_callback(
-    const NovaFSEntry& entry,
-    uint32_t index
+static void strcopy(
+    char* dst,
+    const char* src,
+    int max
 ) {
-    if (findState.result)
-        return;
+    int i = 0;
 
-
-    if (
-        same_text(
-            entry.name,
-            findState.name
-        )
+    while (
+        src[i] &&
+        i < max - 1
     ) {
-        findState.result =
-            make_vnode(
-                entry,
-                index
-            );
+        dst[i] = src[i];
+
+        ++i;
     }
+
+    dst[i] = '\0';
 }
 
 
 // =============================================================
-// finddir
+// Superblock
 // =============================================================
 
-static VNode* novafs_finddir(
-    VNode* node,
-    const char* name
-) {
-    if (!node || !name)
-        return nullptr;
+static void write_superblock() {
+    uint8_t buf[512];
 
+    for (int i = 0; i < 512; ++i)
+        buf[i] = 0;
 
-    uint32_t parent;
+    NovaFSSuperblock* disk_sb =
+        (NovaFSSuperblock*)buf;
 
+    *disk_sb = sb;
 
-    if (
-        node == &rootNode
-    ) {
-        parent =
-            NOVAFS_ROOT_PARENT;
-    }
-
-    else {
-        parent =
-            node->inode;
-    }
-
-
-    findState.name =
-        name;
-
-
-    findState.result =
-        nullptr;
-
-
-    NovaFSDisk::list_directory(
-        parent,
-        finddir_callback
+    ATA::write_sector(
+        0,
+        buf
     );
-
-
-    return findState.result;
 }
 
 
 // =============================================================
-// Create file
+// File table
+// =============================================================
+//
+// Sector 0:
+//     superblock
+//
+// Sectors 1 - 8:
+//     NovaFS entry table
+//
+// Sector 9+:
+//     file contents
+//
 // =============================================================
 
-static VNode* novafs_create(
-    VNode* directory,
+static void read_file_table() {
+    uint8_t buf[512];
+
+    const int entriesPerSector =
+        512 / sizeof(NovaFSEntry);
+
+    int index = 0;
+
+    for (
+        int sectorOffset = 0;
+        sectorOffset < 8 &&
+        index < NOVAFS_MAX_FILES;
+        ++sectorOffset
+    ) {
+        ATA::read_sector(
+            1 + sectorOffset,
+            buf
+        );
+
+        for (
+            int i = 0;
+            i < entriesPerSector &&
+            index < NOVAFS_MAX_FILES;
+            ++i,
+            ++index
+        ) {
+            NovaFSEntry* diskEntry =
+                (NovaFSEntry*)(
+                    buf +
+                    i * sizeof(NovaFSEntry)
+                );
+
+            entries[index] =
+                *diskEntry;
+        }
+    }
+}
+
+
+static void write_file_table() {
+    uint8_t buf[512];
+
+    const int entriesPerSector =
+        512 / sizeof(NovaFSEntry);
+
+    int index = 0;
+
+    for (
+        int sectorOffset = 0;
+        sectorOffset < 8 &&
+        index < NOVAFS_MAX_FILES;
+        ++sectorOffset
+    ) {
+        for (int i = 0; i < 512; ++i)
+            buf[i] = 0;
+
+        for (
+            int i = 0;
+            i < entriesPerSector &&
+            index < NOVAFS_MAX_FILES;
+            ++i,
+            ++index
+        ) {
+            NovaFSEntry* diskEntry =
+                (NovaFSEntry*)(
+                    buf +
+                    i * sizeof(NovaFSEntry)
+                );
+
+            *diskEntry =
+                entries[index];
+        }
+
+        ATA::write_sector(
+            1 + sectorOffset,
+            buf
+        );
+    }
+}
+
+
+// =============================================================
+// Entry helpers
+// =============================================================
+
+static int find_free_slot() {
+    for (
+        int i = 0;
+        i < NOVAFS_MAX_FILES;
+        ++i
+    ) {
+        if (
+            entries[i].name[0] ==
+            '\0'
+        ) {
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+
+static bool valid_parent(
+    uint32_t parent
+) {
+    if (
+        parent ==
+        NOVAFS_ROOT_PARENT
+    ) {
+        return true;
+    }
+
+    if (
+        parent >=
+        NOVAFS_MAX_FILES
+    ) {
+        return false;
+    }
+
+    if (
+        entries[parent].name[0] ==
+        '\0'
+    ) {
+        return false;
+    }
+
+    return
+        entries[parent].type ==
+        NOVAFS_ENTRY_DIRECTORY;
+}
+
+
+static int find_entry(
+    uint32_t parent,
     const char* name
 ) {
-    if (!directory || !name)
-        return nullptr;
-
-
-    if (
-        (directory->flags &
-         VFS_NODE_DIRECTORY) == 0
+    for (
+        int i = 0;
+        i < NOVAFS_MAX_FILES;
+        ++i
     ) {
-        return nullptr;
+        if (
+            entries[i].name[0] &&
+            entries[i].parent == parent &&
+            streq(
+                entries[i].name,
+                name
+            )
+        ) {
+            return i;
+        }
     }
 
-
-    if (name[0] == '\0')
-        return nullptr;
-
-
-    // Prevent duplicate names
-    if (
-        directory->finddir &&
-        directory->finddir(
-            directory,
-            name
-        )
-    ) {
-        return nullptr;
-    }
+    return -1;
+}
 
 
-    uint32_t parent;
-
-
-    if (
-        directory == &rootNode
-    ) {
-        parent =
-            NOVAFS_ROOT_PARENT;
-    }
-
-    else {
-        parent =
-            directory->inode;
-    }
-
-
-    const char* emptyData =
-        "";
-
-
-    if (
-        !NovaFSDisk::save_file_in(
+static int find_file_entry(
+    uint32_t parent,
+    const char* name
+) {
+    int index =
+        find_entry(
             parent,
-            name,
-            emptyData,
-            0
-        )
+            name
+        );
+
+    if (index < 0)
+        return -1;
+
+    if (
+        entries[index].type !=
+        NOVAFS_ENTRY_FILE
     ) {
-        return nullptr;
+        return -1;
     }
 
-
-    return novafs_finddir(
-        directory,
-        name
-    );
+    return index;
 }
 
 
 // =============================================================
-// Root setup
+// Mount / initialization
 // =============================================================
 
-static void build_root_node() {
-    clear_text(
-        rootNode.name,
-        256
+void NovaFSDisk::init() {
+    uint8_t buf[512];
+
+    ATA::read_sector(
+        0,
+        buf
     );
 
-
-    copy_text(
-        rootNode.name,
-        "/",
-        256
-    );
+    NovaFSSuperblock* found =
+        (NovaFSSuperblock*)buf;
 
 
-    rootNode.inode =
-        NOVAFS_ROOT_PARENT;
+    // Require both correct magic and version.
+    //
+    // NovaFS v1 used a different entry layout,
+    // so it must not be loaded as v2.
+
+    if (
+        found->magic == NOVAFS_MAGIC &&
+        found->version == NOVAFS_VERSION
+    ) {
+        sb = *found;
+
+        read_file_table();
+
+        mounted = true;
+
+        return;
+    }
 
 
-    rootNode.size =
+    // No valid NovaFS v2 filesystem.
+    format();
+}
+
+
+// =============================================================
+// Format
+// =============================================================
+
+bool NovaFSDisk::format() {
+    sb.magic =
+        NOVAFS_MAGIC;
+
+    sb.entry_count =
+        0;
+
+    sb.version =
+        NOVAFS_VERSION;
+
+    sb.reserved =
         0;
 
 
-    rootNode.flags =
-        VFS_NODE_DIRECTORY;
-
-
-    rootNode.uid = 0;
-
-    rootNode.gid = 0;
-
-
-    rootNode.fs_data =
-        nullptr;
-
-
-    rootNode.read =
-        nullptr;
-
-
-    rootNode.write =
-        nullptr;
-
-
-    rootNode.open =
-        nullptr;
-
-
-    rootNode.close =
-        nullptr;
-
-
-    rootNode.readdir =
-        novafs_readdir;
-
-
-    rootNode.finddir =
-        novafs_finddir;
-
-
-    rootNode.create =
-        novafs_create;
-}
-
-
-// =============================================================
-// Public interface
-// =============================================================
-
-VNode* NovaFSVFS::get_root() {
-    return &rootNode;
-}
-
-
-bool NovaFSVFS::mount_root() {
     for (
         int i = 0;
-        i < MAX_VNODES;
+        i < NOVAFS_MAX_FILES;
         ++i
     ) {
-        nodeUsed[i] =
-            false;
+        entries[i].name[0] =
+            '\0';
+
+        entries[i].size =
+            0;
+
+        entries[i].start_sector =
+            0;
+
+        entries[i].parent =
+            NOVAFS_ROOT_PARENT;
+
+        entries[i].type =
+            0;
     }
 
 
-    build_root_node();
+    mounted = true;
 
 
-    return VFS::mount(
-        "/",
-        &rootNode
+    write_superblock();
+
+    write_file_table();
+
+
+    return true;
+}
+
+
+// =============================================================
+// Directories
+// =============================================================
+
+bool NovaFSDisk::create_directory(
+    uint32_t parent,
+    const char* name
+) {
+    if (!mounted)
+        return false;
+
+    if (!name || !name[0])
+        return false;
+
+    if (!valid_parent(parent))
+        return false;
+
+
+    // Don't allow duplicate names in the same directory.
+
+    if (
+        find_entry(
+            parent,
+            name
+        ) >= 0
+    ) {
+        return false;
+    }
+
+
+    int index =
+        find_free_slot();
+
+    if (index < 0)
+        return false;
+
+
+    strcopy(
+        entries[index].name,
+        name,
+        NOVAFS_MAX_NAME
     );
+
+
+    entries[index].size =
+        0;
+
+    entries[index].start_sector =
+        0;
+
+    entries[index].parent =
+        parent;
+
+    entries[index].type =
+        NOVAFS_ENTRY_DIRECTORY;
+
+
+    ++sb.entry_count;
+
+
+    sync();
+
+
+    return true;
+}
+
+
+int NovaFSDisk::find_directory(
+    uint32_t parent,
+    const char* name
+) {
+    int index =
+        find_entry(
+            parent,
+            name
+        );
+
+    if (index < 0)
+        return -1;
+
+    if (
+        entries[index].type !=
+        NOVAFS_ENTRY_DIRECTORY
+    ) {
+        return -1;
+    }
+
+    return index;
+}
+
+
+void NovaFSDisk::list_directory(
+    uint32_t parent,
+    void (*cb)(
+        const NovaFSEntry& entry,
+        uint32_t index
+    )
+) {
+    if (!mounted || !cb)
+        return;
+
+    for (
+        uint32_t i = 0;
+        i < NOVAFS_MAX_FILES;
+        ++i
+    ) {
+        if (
+            entries[i].name[0] &&
+            entries[i].parent ==
+                parent
+        ) {
+            cb(
+                entries[i],
+                i
+            );
+        }
+    }
+}
+
+
+// =============================================================
+// Save file
+// =============================================================
+
+bool NovaFSDisk::save_file(
+    const char* name,
+    const char* data,
+    uint32_t size
+) {
+    return save_file_in(
+        NOVAFS_ROOT_PARENT,
+        name,
+        data,
+        size
+    );
+}
+
+
+bool NovaFSDisk::save_file_in(
+    uint32_t parent,
+    const char* name,
+    const char* data,
+    uint32_t size
+) {
+    if (!mounted)
+        return false;
+
+    if (!name || !name[0])
+        return false;
+
+    if (!valid_parent(parent))
+        return false;
+
+    if (
+        size >
+        NOVAFS_MAX_FILE_SECTORS *
+        512
+    ) {
+        return false;
+    }
+
+
+    int index =
+        find_entry(
+            parent,
+            name
+        );
+
+
+    if (index >= 0) {
+        // A directory with this name already
+        // exists, so it cannot become a file.
+
+        if (
+            entries[index].type !=
+            NOVAFS_ENTRY_FILE
+        ) {
+            return false;
+        }
+    }
+
+    else {
+        index =
+            find_free_slot();
+
+        if (index < 0)
+            return false;
+
+
+        strcopy(
+            entries[index].name,
+            name,
+            NOVAFS_MAX_NAME
+        );
+
+
+        entries[index].size =
+            0;
+
+
+        entries[index].start_sector =
+            NOVAFS_DATA_START_SECTOR +
+            index *
+            NOVAFS_MAX_FILE_SECTORS;
+
+
+        entries[index].parent =
+            parent;
+
+
+        entries[index].type =
+            NOVAFS_ENTRY_FILE;
+
+
+        ++sb.entry_count;
+    }
+
+
+    entries[index].size =
+        size;
+
+
+    uint32_t sector =
+        entries[index].start_sector;
+
+    uint32_t remaining =
+        size;
+
+    uint32_t offset =
+        0;
+
+
+    uint8_t buf[512];
+
+
+    // Write at least one sector even for
+    // an empty file.
+
+    do {
+        for (
+            int i = 0;
+            i < 512;
+            ++i
+        ) {
+            buf[i] = 0;
+        }
+
+
+        uint32_t chunk =
+            remaining > 512
+                ? 512
+                : remaining;
+
+
+        for (
+            uint32_t i = 0;
+            i < chunk;
+            ++i
+        ) {
+            buf[i] =
+                (uint8_t)
+                data[offset + i];
+        }
+
+
+        ATA::write_sector(
+            sector,
+            buf
+        );
+
+
+        ++sector;
+
+        offset +=
+            chunk;
+
+        remaining -=
+            chunk;
+
+    } while (
+        remaining > 0
+    );
+
+
+    sync();
+
+
+    return true;
+}
+
+
+// =============================================================
+// Load file
+// =============================================================
+
+bool NovaFSDisk::load_file(
+    const char* name,
+    char* out_buf,
+    uint32_t max_size,
+    uint32_t* out_size
+) {
+    return load_file_in(
+        NOVAFS_ROOT_PARENT,
+        name,
+        out_buf,
+        max_size,
+        out_size
+    );
+}
+
+
+bool NovaFSDisk::load_file_in(
+    uint32_t parent,
+    const char* name,
+    char* out_buf,
+    uint32_t max_size,
+    uint32_t* out_size
+) {
+    if (!mounted)
+        return false;
+
+    if (!out_buf || !out_size)
+        return false;
+
+    if (max_size == 0)
+        return false;
+
+
+    int index =
+        find_file_entry(
+            parent,
+            name
+        );
+
+    if (index < 0)
+        return false;
+
+
+    uint32_t size =
+        entries[index].size;
+
+
+    // Keep one byte free for '\0'.
+
+    if (
+        size >=
+        max_size
+    ) {
+        size =
+            max_size - 1;
+    }
+
+
+    *out_size =
+        size;
+
+
+    uint32_t sector =
+        entries[index].start_sector;
+
+    uint32_t remaining =
+        size;
+
+    uint32_t offset =
+        0;
+
+
+    uint8_t buf[512];
+
+
+    while (
+        remaining > 0
+    ) {
+        ATA::read_sector(
+            sector,
+            buf
+        );
+
+
+        uint32_t chunk =
+            remaining > 512
+                ? 512
+                : remaining;
+
+
+        for (
+            uint32_t i = 0;
+            i < chunk;
+            ++i
+        ) {
+            out_buf[offset + i] =
+                (char)buf[i];
+        }
+
+
+        ++sector;
+
+        offset +=
+            chunk;
+
+        remaining -=
+            chunk;
+    }
+
+
+    out_buf[size] =
+        '\0';
+
+
+    return true;
+}
+
+
+// =============================================================
+// Existing root-file listing
+// =============================================================
+
+void NovaFSDisk::list_files(
+    void (*cb)(
+        const char* name,
+        uint32_t size
+    )
+) {
+    if (!mounted || !cb)
+        return;
+
+
+    for (
+        int i = 0;
+        i < NOVAFS_MAX_FILES;
+        ++i
+    ) {
+        if (
+            entries[i].name[0] &&
+            entries[i].parent ==
+                NOVAFS_ROOT_PARENT &&
+            entries[i].type ==
+                NOVAFS_ENTRY_FILE
+        ) {
+            cb(
+                entries[i].name,
+                entries[i].size
+            );
+        }
+    }
+}
+
+
+// =============================================================
+// Delete root file
+// =============================================================
+
+bool NovaFSDisk::delete_file(
+    const char* name
+) {
+    if (!mounted)
+        return false;
+
+
+    int index =
+        find_file_entry(
+            NOVAFS_ROOT_PARENT,
+            name
+        );
+
+
+    if (index < 0)
+        return false;
+
+
+    return delete_entry(
+        (uint32_t)index
+    );
+}
+
+
+// =============================================================
+// Delete entry
+// =============================================================
+
+bool NovaFSDisk::delete_entry(
+    uint32_t index
+) {
+    if (!mounted)
+        return false;
+
+
+    if (
+        index >=
+        NOVAFS_MAX_FILES
+    ) {
+        return false;
+    }
+
+
+    if (
+        entries[index].name[0] ==
+        '\0'
+    ) {
+        return false;
+    }
+
+
+    // Don't delete a directory if it
+    // still contains files/folders.
+
+    if (
+        entries[index].type ==
+        NOVAFS_ENTRY_DIRECTORY
+    ) {
+        for (
+            int i = 0;
+            i < NOVAFS_MAX_FILES;
+            ++i
+        ) {
+            if (
+                entries[i].name[0] &&
+                entries[i].parent ==
+                    index
+            ) {
+                return false;
+            }
+        }
+    }
+
+
+    entries[index].name[0] =
+        '\0';
+
+    entries[index].size =
+        0;
+
+    entries[index].start_sector =
+        0;
+
+    entries[index].parent =
+        NOVAFS_ROOT_PARENT;
+
+    entries[index].type =
+        0;
+
+
+    if (
+        sb.entry_count > 0
+    ) {
+        --sb.entry_count;
+    }
+
+
+    sync();
+
+
+    return true;
+}
+
+
+// =============================================================
+// Synchronize metadata
+// =============================================================
+
+void NovaFSDisk::sync() {
+    if (!mounted)
+        return;
+
+
+    write_file_table();
+
+    write_superblock();
 }

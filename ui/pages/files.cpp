@@ -4,6 +4,7 @@
 #include "../core/rect.h"
 
 #include "../../kernel/drivers/video/framebuffer.h"
+#include "../../kernel/drivers/keyboard/keyboard.h"
 #include "../../kernel/fs/vfs.h"
 
 
@@ -13,10 +14,17 @@ namespace {
     // Configuration
     // =========================================================
 
-    constexpr int MAX_ENTRIES = 32;
-    constexpr int MAX_NAME = 64;
-    constexpr int MAX_PATH = 256;
-    constexpr int MAX_FILE_CONTENT = 4096;
+    constexpr int MAX_ENTRIES =
+        32;
+
+    constexpr int MAX_NAME =
+        64;
+
+    constexpr int MAX_PATH =
+        256;
+
+    constexpr int MAX_FILE_CONTENT =
+        4096;
 
 
     // =========================================================
@@ -37,7 +45,8 @@ namespace {
 
     EntryCard entries[MAX_ENTRIES];
 
-    int entryCount = 0;
+    int entryCount =
+        0;
 
 
     // =========================================================
@@ -51,7 +60,10 @@ namespace {
         42
     };
 
-    bool backHovered = false;
+
+    bool backHovered =
+        false;
+
 
     Rect newFileButton = {
         620,
@@ -60,24 +72,50 @@ namespace {
         30
     };
 
-    bool newFileHovered = false;
 
-    char currentPath[MAX_PATH] = "/";
+    bool newFileHovered =
+        false;
+
+
+    char currentPath[MAX_PATH] =
+        "/";
 
 
     // =========================================================
-    // File viewer state
+    // File editor state
     // =========================================================
 
-    bool viewingFile = false;
+    bool viewingFile =
+        false;
 
-    char openedFileName[MAX_NAME] = "";
+
+    char openedFileName[MAX_NAME] =
+        "";
+
 
     char openedFileContent[
         MAX_FILE_CONTENT + 1
     ] = "";
 
-    uint32_t openedFileSize = 0;
+
+    uint32_t openedFileSize =
+        0;
+
+
+    bool fileDirty =
+        false;
+
+
+    Rect saveButton = {
+        620,
+        185,
+        110,
+        34
+    };
+
+
+    bool saveHovered =
+        false;
 
 
     // =========================================================
@@ -89,21 +127,32 @@ namespace {
         const char* src,
         int max
     ) {
-        if (!dst || !src || max <= 0)
+        if (
+            !dst ||
+            !src ||
+            max <= 0
+        ) {
             return;
+        }
 
-        int i = 0;
+
+        int i =
+            0;
+
 
         while (
             src[i] &&
             i < max - 1
         ) {
-            dst[i] = src[i];
+            dst[i] =
+                src[i];
 
             ++i;
         }
 
-        dst[i] = '\0';
+
+        dst[i] =
+            '\0';
     }
 
 
@@ -113,10 +162,17 @@ namespace {
         if (!text)
             return 0;
 
-        int length = 0;
 
-        while (text[length])
+        int length =
+            0;
+
+
+        while (
+            text[length]
+        ) {
             ++length;
+        }
+
 
         return length;
     }
@@ -126,10 +182,17 @@ namespace {
         const char* a,
         const char* b
     ) {
-        if (!a || !b)
+        if (
+            !a ||
+            !b
+        ) {
             return false;
+        }
 
-        int i = 0;
+
+        int i =
+            0;
+
 
         while (
             a[i] &&
@@ -142,8 +205,10 @@ namespace {
                 return false;
             }
 
+
             ++i;
         }
+
 
         return
             a[i] == '\0' &&
@@ -164,14 +229,20 @@ namespace {
 
 
     void go_to_root() {
-        currentPath[0] = '/';
-        currentPath[1] = '\0';
+        currentPath[0] =
+            '/';
+
+        currentPath[1] =
+            '\0';
     }
 
 
     void go_back() {
-        if (is_root_path())
+        if (
+            is_root_path()
+        ) {
             return;
+        }
 
 
         int length =
@@ -182,20 +253,26 @@ namespace {
 
         while (
             length > 1 &&
-            currentPath[length - 1] != '/'
+            currentPath[
+                length - 1
+            ] != '/'
         ) {
             --length;
         }
 
 
-        if (length <= 1) {
+        if (
+            length <= 1
+        ) {
             go_to_root();
 
             return;
         }
 
 
-        currentPath[length - 1] =
+        currentPath[
+            length - 1
+        ] =
             '\0';
     }
 
@@ -212,6 +289,7 @@ namespace {
                 currentPath
             );
 
+
         int nameLength =
             text_length(
                 name
@@ -225,7 +303,11 @@ namespace {
         int required =
             pathLength +
             nameLength +
-            (needSlash ? 1 : 0) +
+            (
+                needSlash
+                    ? 1
+                    : 0
+            ) +
             1;
 
 
@@ -242,7 +324,9 @@ namespace {
 
 
         if (needSlash) {
-            currentPath[position++] =
+            currentPath[
+                position++
+            ] =
                 '/';
         }
 
@@ -252,12 +336,16 @@ namespace {
             i < nameLength;
             ++i
         ) {
-            currentPath[position++] =
+            currentPath[
+                position++
+            ] =
                 name[i];
         }
 
 
-        currentPath[position] =
+        currentPath[
+            position
+        ] =
             '\0';
 
 
@@ -270,11 +358,18 @@ namespace {
         char* output,
         int max
     ) {
-        if (!name || !output || max <= 0)
+        if (
+            !name ||
+            !output ||
+            max <= 0
+        ) {
             return false;
+        }
 
 
-        int position = 0;
+        int position =
+            0;
+
 
         int pathLength =
             text_length(
@@ -288,7 +383,9 @@ namespace {
             position < max - 1;
             ++i
         ) {
-            output[position++] =
+            output[
+                position++
+            ] =
                 currentPath[i];
         }
 
@@ -297,7 +394,9 @@ namespace {
             !is_root_path() &&
             position < max - 1
         ) {
-            output[position++] =
+            output[
+                position++
+            ] =
                 '/';
         }
 
@@ -314,12 +413,16 @@ namespace {
             position < max - 1;
             ++i
         ) {
-            output[position++] =
+            output[
+                position++
+            ] =
                 name[i];
         }
 
 
-        output[position] =
+        output[
+            position
+        ] =
             '\0';
 
 
@@ -332,7 +435,9 @@ namespace {
     // =========================================================
 
     void clear_entries() {
-        entryCount = 0;
+        entryCount =
+            0;
+
 
         for (
             int i = 0;
@@ -346,14 +451,18 @@ namespace {
                 0
             };
 
+
             entries[i].name[0] =
                 '\0';
+
 
             entries[i].size =
                 0;
 
+
             entries[i].directory =
                 false;
+
 
             entries[i].hovered =
                 false;
@@ -366,16 +475,29 @@ namespace {
     // =========================================================
 
     void layout_entries() {
-        const int startX = 190;
-        const int startY = 190;
+        const int startX =
+            190;
 
-        const int width = 150;
-        const int height = 90;
+        const int startY =
+            190;
 
-        const int gapX = 20;
-        const int gapY = 20;
 
-        const int columns = 3;
+        const int width =
+            150;
+
+        const int height =
+            90;
+
+
+        const int gapX =
+            20;
+
+        const int gapY =
+            20;
+
+
+        const int columns =
+            3;
 
 
         for (
@@ -384,20 +506,29 @@ namespace {
             ++i
         ) {
             int column =
-                i % columns;
+                i %
+                columns;
+
 
             int row =
-                i / columns;
+                i /
+                columns;
 
 
             entries[i].bounds = {
                 startX +
                     column *
-                    (width + gapX),
+                    (
+                        width +
+                        gapX
+                    ),
 
                 startY +
                     row *
-                    (height + gapY),
+                    (
+                        height +
+                        gapY
+                    ),
 
                 width,
                 height
@@ -407,7 +538,7 @@ namespace {
 
 
     // =========================================================
-    // Load directory from VFS
+    // Load directory
     // =========================================================
 
     void load_directory() {
@@ -450,7 +581,9 @@ namespace {
 
 
             EntryCard& entry =
-                entries[entryCount];
+                entries[
+                    entryCount
+                ];
 
 
             copy_text(
@@ -491,7 +624,7 @@ namespace {
 
 
     // =========================================================
-    // Folder drawing
+    // Draw folder
     // =========================================================
 
     void draw_folder(
@@ -541,7 +674,7 @@ namespace {
 
 
     // =========================================================
-    // File drawing
+    // Draw file
     // =========================================================
 
     void draw_file(
@@ -582,13 +715,15 @@ namespace {
 
 
     // =========================================================
-    // Entry drawing
+    // Draw entry
     // =========================================================
 
     void draw_entry(
         EntryCard& entry
     ) {
-        if (entry.directory) {
+        if (
+            entry.directory
+        ) {
             draw_folder(
                 entry
             );
@@ -631,28 +766,68 @@ namespace {
         );
     }
 
+
+    // =========================================================
+    // New File button
+    // =========================================================
+
     void draw_new_file_button() {
-    uint32_t background =
-        newFileHovered
-            ? NovaColors::SurfaceHover
-            : NovaColors::SurfaceRaised;
+        uint32_t background =
+            newFileHovered
+                ? NovaColors::SurfaceHover
+                : NovaColors::SurfaceRaised;
 
-    Framebuffer::draw_rounded_rect(
-        newFileButton.x,
-        newFileButton.y,
-        newFileButton.width,
-        newFileButton.height,
-        8,
-        background
-    );
 
-    Framebuffer::print_at(
-        "+ New File",
-        newFileButton.x + 12,
-        newFileButton.y + 8,
-        NovaColors::TextPrimary
-    );
-}
+        Framebuffer::draw_rounded_rect(
+            newFileButton.x,
+            newFileButton.y,
+            newFileButton.width,
+            newFileButton.height,
+            8,
+            background
+        );
+
+
+        Framebuffer::print_at(
+            "+ New File",
+            newFileButton.x + 12,
+            newFileButton.y + 8,
+            NovaColors::TextPrimary
+        );
+    }
+
+
+    // =========================================================
+    // Save button
+    // =========================================================
+
+    void draw_save_button() {
+        uint32_t background =
+            saveHovered
+                ? NovaColors::SurfaceHover
+                : NovaColors::SurfaceRaised;
+
+
+        Framebuffer::draw_rounded_rect(
+            saveButton.x,
+            saveButton.y,
+            saveButton.width,
+            saveButton.height,
+            8,
+            background
+        );
+
+
+        Framebuffer::print_at(
+            fileDirty
+                ? "Save *"
+                : "Save",
+            saveButton.x + 22,
+            saveButton.y + 10,
+            NovaColors::TextPrimary
+        );
+    }
+
 
     // =========================================================
     // Open directory
@@ -678,7 +853,9 @@ namespace {
 
         if (
             !node ||
-            !VFS::is_directory(node)
+            !VFS::is_directory(
+                node
+            )
         ) {
             go_back();
 
@@ -689,29 +866,41 @@ namespace {
         load_directory();
     }
 
-    void create_new_file() {
-    char fullPath[MAX_PATH];
 
-    if (
-        !build_file_path(
-            "NewFile.txt",
-            fullPath,
+    // =========================================================
+    // Create new file
+    // =========================================================
+
+    void create_new_file() {
+        char fullPath[
             MAX_PATH
-        )
-    ) {
-        return;
+        ];
+
+
+        if (
+            !build_file_path(
+                "NewFile.txt",
+                fullPath,
+                MAX_PATH
+            )
+        ) {
+            return;
+        }
+
+
+        VNode* file =
+            VFS::create(
+                fullPath
+            );
+
+
+        if (!file)
+            return;
+
+
+        load_directory();
     }
 
-    VNode* file =
-        VFS::create(
-            fullPath
-        );
-
-    if (!file)
-        return;
-
-    load_directory();
-}
 
     // =========================================================
     // Open file
@@ -720,7 +909,9 @@ namespace {
     void open_file(
         const char* name
     ) {
-        char fullPath[MAX_PATH];
+        char fullPath[
+            MAX_PATH
+        ];
 
 
         if (
@@ -746,9 +937,13 @@ namespace {
 
 
         if (
-            !VFS::is_file(file)
+            !VFS::is_file(
+                file
+            )
         ) {
-            VFS::close(file);
+            VFS::close(
+                file
+            );
 
             return;
         }
@@ -757,17 +952,23 @@ namespace {
         int bytesRead =
             VFS::read(
                 file,
-                (uint8_t*)openedFileContent,
+                (uint8_t*)
+                    openedFileContent,
                 MAX_FILE_CONTENT,
                 0
             );
 
 
-        VFS::close(file);
+        VFS::close(
+            file
+        );
 
 
-        if (bytesRead < 0)
+        if (
+            bytesRead < 0
+        ) {
             return;
+        }
 
 
         if (
@@ -779,12 +980,15 @@ namespace {
         }
 
 
-        openedFileContent[bytesRead] =
+        openedFileContent[
+            bytesRead
+        ] =
             '\0';
 
 
         openedFileSize =
-            (uint32_t)bytesRead;
+            (uint32_t)
+            bytesRead;
 
 
         copy_text(
@@ -796,20 +1000,319 @@ namespace {
 
         viewingFile =
             true;
+
+
+        fileDirty =
+            false;
+
+
+        saveHovered =
+            false;
     }
 
 
     // =========================================================
-    // Draw opened file
+    // Save file
+    // =========================================================
+
+    bool save_opened_file() {
+        if (
+            !viewingFile
+        ) {
+            return false;
+        }
+
+
+        char fullPath[
+            MAX_PATH
+        ];
+
+
+        if (
+            !build_file_path(
+                openedFileName,
+                fullPath,
+                MAX_PATH
+            )
+        ) {
+            return false;
+        }
+
+
+        VNode* file =
+            VFS::open(
+                fullPath,
+                VFS_OPEN_WRITE
+            );
+
+
+        if (!file)
+            return false;
+
+
+        if (
+            !VFS::is_file(
+                file
+            )
+        ) {
+            VFS::close(
+                file
+            );
+
+            return false;
+        }
+
+
+        int written =
+            VFS::write(
+                file,
+                (uint8_t*)
+                    openedFileContent,
+                openedFileSize,
+                0
+            );
+
+
+        VFS::close(
+            file
+        );
+
+
+        if (
+            written !=
+            (int)
+            openedFileSize
+        ) {
+            return false;
+        }
+
+
+        fileDirty =
+            false;
+
+
+        return true;
+    }
+
+
+    // =========================================================
+    // Keyboard editor update
+    // =========================================================
+    //
+    // Returns true if the text changed and a redraw is needed.
+    //
+    // IMPORTANT:
+    // This is now called from FilesPage::update(), not draw().
+    // =========================================================
+
+    bool process_editor_keyboard() {
+        if (
+            !viewingFile
+        ) {
+            return false;
+        }
+
+
+        bool changed =
+            false;
+
+
+        char c;
+
+
+        while (
+            Keyboard::try_getchar(
+                &c
+            )
+        ) {
+
+            // -------------------------------------------------
+            // Backspace
+            // -------------------------------------------------
+
+            if (
+                c == '\b'
+            ) {
+                if (
+                    openedFileSize >
+                    0
+                ) {
+                    --openedFileSize;
+
+
+                    openedFileContent[
+                        openedFileSize
+                    ] =
+                        '\0';
+
+
+                    fileDirty =
+                        true;
+
+
+                    changed =
+                        true;
+                }
+
+
+                continue;
+            }
+
+
+            // -------------------------------------------------
+            // Tab
+            // -------------------------------------------------
+
+            if (
+                c == '\t'
+            ) {
+                bool added =
+                    false;
+
+
+                for (
+                    int i = 0;
+                    i < 4;
+                    ++i
+                ) {
+                    if (
+                        openedFileSize >=
+                        MAX_FILE_CONTENT
+                    ) {
+                        break;
+                    }
+
+
+                    openedFileContent[
+                        openedFileSize++
+                    ] =
+                        ' ';
+
+
+                    added =
+                        true;
+                }
+
+
+                openedFileContent[
+                    openedFileSize
+                ] =
+                    '\0';
+
+
+                if (added) {
+                    fileDirty =
+                        true;
+
+
+                    changed =
+                        true;
+                }
+
+
+                continue;
+            }
+
+
+            // -------------------------------------------------
+            // Enter
+            // -------------------------------------------------
+
+            if (
+                c == '\n'
+            ) {
+                if (
+                    openedFileSize <
+                    MAX_FILE_CONTENT
+                ) {
+                    openedFileContent[
+                        openedFileSize++
+                    ] =
+                        '\n';
+
+
+                    openedFileContent[
+                        openedFileSize
+                    ] =
+                        '\0';
+
+
+                    fileDirty =
+                        true;
+
+
+                    changed =
+                        true;
+                }
+
+
+                continue;
+            }
+
+
+            // -------------------------------------------------
+            // Printable ASCII
+            // -------------------------------------------------
+
+            if (
+                c >= 32 &&
+                c <= 126
+            ) {
+                if (
+                    openedFileSize <
+                    MAX_FILE_CONTENT
+                ) {
+                    openedFileContent[
+                        openedFileSize++
+                    ] =
+                        c;
+
+
+                    openedFileContent[
+                        openedFileSize
+                    ] =
+                        '\0';
+
+
+                    fileDirty =
+                        true;
+
+
+                    changed =
+                        true;
+                }
+            }
+        }
+
+
+        return changed;
+    }
+
+
+    // =========================================================
+    // Draw opened file/editor
     // =========================================================
 
     void draw_opened_file_content() {
         char line[80];
 
-        int lineIndex = 0;
 
-        int x = 190;
-        int y = 220;
+        int lineIndex =
+            0;
+
+
+        int x =
+            190;
+
+        int y =
+            235;
+
+
+        int cursorX =
+            190;
+
+        int cursorY =
+            235;
 
 
         for (
@@ -821,39 +1324,107 @@ namespace {
                 openedFileContent[i];
 
 
+            // -------------------------------------------------
+            // End line / wrap / end file
+            // -------------------------------------------------
+
             if (
                 c == '\n' ||
                 c == '\0' ||
                 lineIndex >= 78
             ) {
-                line[lineIndex] =
+                line[
+                    lineIndex
+                ] =
                     '\0';
 
 
-                Framebuffer::print_at(
-                    line,
-                    x,
-                    y,
-                    NovaColors::TextPrimary
-                );
+                if (
+                    lineIndex >
+                    0
+                ) {
+                    Framebuffer::print_at(
+                        line,
+                        x,
+                        y,
+                        NovaColors::TextPrimary
+                    );
+                }
 
 
-                y += 20;
+                cursorX =
+                    x +
+                    lineIndex *
+                    8;
 
-                lineIndex = 0;
+
+                cursorY =
+                    y;
 
 
-                if (c == '\0')
+                if (
+                    c == '\0'
+                ) {
                     break;
+                }
 
 
-                continue;
+                y +=
+                    20;
+
+
+                lineIndex =
+                    0;
+
+
+                cursorX =
+                    x;
+
+
+                cursorY =
+                    y;
+
+
+                if (
+                    c == '\n'
+                ) {
+                    continue;
+                }
             }
 
 
-            line[lineIndex++] =
+            // -------------------------------------------------
+            // Add character
+            // -------------------------------------------------
+
+            line[
+                lineIndex++
+            ] =
                 c;
+
+
+            cursorX =
+                x +
+                lineIndex *
+                8;
+
+
+            cursorY =
+                y;
         }
+
+
+        // -----------------------------------------------------
+        // Cursor
+        // -----------------------------------------------------
+
+        Framebuffer::draw_rect(
+            cursorX,
+            cursorY,
+            2,
+            14,
+            NovaColors::TextPrimary
+        );
     }
 
 }
@@ -866,26 +1437,58 @@ namespace {
 void FilesPage::init() {
     go_to_root();
 
+
     backHovered =
         false;
+
 
     newFileHovered =
         false;
 
+
+    saveHovered =
+        false;
+
+
     viewingFile =
         false;
+
 
     openedFileName[0] =
         '\0';
 
+
     openedFileContent[0] =
         '\0';
+
 
     openedFileSize =
         0;
 
 
+    fileDirty =
+        false;
+
+
     load_directory();
+}
+
+
+// =============================================================
+// Update
+// =============================================================
+//
+// Keyboard input is handled here instead of draw().
+//
+// Desktop::run() should call this every loop while the Files
+// page is active.
+//
+// Returns true when the page needs to be redrawn.
+// =============================================================
+
+bool FilesPage::update() {
+    return
+        process_editor_keyboard();
 }
 
 
@@ -908,7 +1511,9 @@ void FilesPage::draw() {
 
 
     Framebuffer::print_at(
-        "Browse NovaFS",
+        viewingFile
+            ? "Edit NovaFS file"
+            : "Browse NovaFS",
         190,
         98,
         NovaColors::TextSecondary
@@ -916,14 +1521,22 @@ void FilesPage::draw() {
 
 
     // ---------------------------------------------------------
-    // Back button
+    // Back
     // ---------------------------------------------------------
 
     draw_back_button();
 
-    if (!viewingFile) {
+
+    // ---------------------------------------------------------
+    // New File
+    // ---------------------------------------------------------
+
+    if (
+        !viewingFile
+    ) {
         draw_new_file_button();
     }
+
 
     // ---------------------------------------------------------
     // Path bar
@@ -948,10 +1561,12 @@ void FilesPage::draw() {
 
 
     // ---------------------------------------------------------
-    // File viewer
+    // Editor
     // ---------------------------------------------------------
 
-    if (viewingFile) {
+    if (
+        viewingFile
+    ) {
         Framebuffer::print_at(
             openedFileName,
             190,
@@ -960,7 +1575,11 @@ void FilesPage::draw() {
         );
 
 
+        draw_save_button();
+
+
         draw_opened_file_content();
+
 
         return;
     }
@@ -982,11 +1601,12 @@ void FilesPage::draw() {
 
 
     // ---------------------------------------------------------
-    // Empty directory message
+    // Empty folder
     // ---------------------------------------------------------
 
     if (
-        entryCount == 0
+        entryCount ==
+        0
     ) {
         Framebuffer::print_at(
             "This folder is empty.",
@@ -1012,6 +1632,7 @@ void FilesPage::handle_hover(
             mouseY
         );
 
+
     newFileHovered =
         !viewingFile &&
         newFileButton.contains(
@@ -1019,19 +1640,21 @@ void FilesPage::handle_hover(
             mouseY
         );
 
-    if (viewingFile)
-        return;
+
+    saveHovered =
+        viewingFile &&
+        saveButton.contains(
+            mouseX,
+            mouseY
+        );
+
 
     if (
-        !viewingFile &&
-        newFileButton.contains(
-            mouseX,mouseY
-        )
+        viewingFile
     ) {
-        create_new_file();
-
         return;
     }
+
 
     for (
         int i = 0;
@@ -1066,18 +1689,32 @@ void FilesPage::handle_click(
             mouseY
         )
     ) {
-        if (viewingFile) {
+        if (
+            viewingFile
+        ) {
             viewingFile =
                 false;
+
 
             openedFileName[0] =
                 '\0';
 
+
             openedFileContent[0] =
                 '\0';
 
+
             openedFileSize =
                 0;
+
+
+            fileDirty =
+                false;
+
+
+            saveHovered =
+                false;
+
 
             return;
         }
@@ -1085,18 +1722,61 @@ void FilesPage::handle_click(
 
         go_back();
 
+
         load_directory();
+
 
         return;
     }
 
 
-    if (viewingFile)
+    // ---------------------------------------------------------
+    // Save
+    // ---------------------------------------------------------
+
+    if (
+        viewingFile &&
+        saveButton.contains(
+            mouseX,
+            mouseY
+        )
+    ) {
+        save_opened_file();
+
         return;
+    }
 
 
     // ---------------------------------------------------------
-    // Directory / file cards
+    // New File
+    // ---------------------------------------------------------
+
+    if (
+        !viewingFile &&
+        newFileButton.contains(
+            mouseX,
+            mouseY
+        )
+    ) {
+        create_new_file();
+
+        return;
+    }
+
+
+    // ---------------------------------------------------------
+    // No file cards while editing
+    // ---------------------------------------------------------
+
+    if (
+        viewingFile
+    ) {
+        return;
+    }
+
+
+    // ---------------------------------------------------------
+    // File / directory cards
     // ---------------------------------------------------------
 
     for (
@@ -1128,6 +1808,7 @@ void FilesPage::handle_click(
         open_file(
             entries[i].name
         );
+
 
         return;
     }

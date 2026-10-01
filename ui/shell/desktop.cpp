@@ -53,82 +53,166 @@ DesktopPage Desktop::get_page() {
 
 
 void Desktop::run() {
-    bool previousLeft = false;
+    bool previousLeft =
+        false;
 
-    int previousX = -1;
-    int previousY = -1;
+    int previousX =
+        -1;
+
+    int previousY =
+        -1;
+
 
     for (;;) {
+
+        // -----------------------------------------------------
+        // Poll mouse
+        // -----------------------------------------------------
+
         Mouse::poll();
 
         Mouse::State& mouse =
             Mouse::get_state();
 
+
+        // -----------------------------------------------------
+        // Process keyboard/page updates EVERY loop
+        // -----------------------------------------------------
+
+        bool pageChanged =
+            false;
+
+
+        if (
+            currentPage ==
+            DesktopPage::Files
+        ) {
+            pageChanged =
+                FilesPage::update();
+        }
+
+
+        // -----------------------------------------------------
+        // Mouse movement
+        // -----------------------------------------------------
+
         bool moved =
             mouse.x != previousX ||
             mouse.y != previousY;
 
+
         if (moved) {
-    Cursor::restore();
+            Cursor::restore();
 
-    Sidebar::handle_hover(
-        mouse.x,
-        mouse.y
-    );
 
-    if (
-        currentPage ==
-        DesktopPage::Files
-    ) {
-        FilesPage::handle_hover(
-            mouse.x,
-            mouse.y
-        );
+            Sidebar::handle_hover(
+                mouse.x,
+                mouse.y
+            );
 
-        draw();
-    }
 
-    Cursor::move_to(
-        mouse.x,
-        mouse.y
-    );
+            if (
+                currentPage ==
+                DesktopPage::Files
+            ) {
+                FilesPage::handle_hover(
+                    mouse.x,
+                    mouse.y
+                );
+            }
 
-    Cursor::draw();
 
-    previousX = mouse.x;
-    previousY = mouse.y;
-}
+            draw();
 
-        if (
-    mouse.left &&
-    !previousLeft
-) {
-    Cursor::restore();
 
-    Sidebar::handle_click(
-        mouse.x,
-        mouse.y
-    );
+            Cursor::move_to(
+                mouse.x,
+                mouse.y
+            );
 
-    if (
-        currentPage ==
-        DesktopPage::Files
-    ) {
-        FilesPage::handle_click(
-            mouse.x,
-            mouse.y
-        );
 
-        draw();
-    }
+            Cursor::draw();
 
-    Cursor::move_to(
-        mouse.x,
-        mouse.y
-    );
 
-    Cursor::draw();
-}
+            previousX =
+                mouse.x;
+
+            previousY =
+                mouse.y;
+
+
+            pageChanged =
+                false;
+        }
+
+
+        // -----------------------------------------------------
+        // Mouse click
+        // -----------------------------------------------------
+
+        bool clicked =
+            mouse.left &&
+            !previousLeft;
+
+
+        if (clicked) {
+            Cursor::restore();
+
+
+            Sidebar::handle_click(
+                mouse.x,
+                mouse.y
+            );
+
+
+            if (
+                currentPage ==
+                DesktopPage::Files
+            ) {
+                FilesPage::handle_click(
+                    mouse.x,
+                    mouse.y
+                );
+            }
+
+
+            draw();
+
+
+            Cursor::move_to(
+                mouse.x,
+                mouse.y
+            );
+
+
+            Cursor::draw();
+
+
+            pageChanged =
+                false;
+        }
+
+
+        // -----------------------------------------------------
+        // Keyboard changed the editor
+        // -----------------------------------------------------
+
+        if (pageChanged) {
+            Cursor::restore();
+
+
+            draw();
+
+
+            Cursor::move_to(
+                mouse.x,
+                mouse.y
+            );
+
+
+            Cursor::draw();
+        }
+
 
         previousLeft =
             mouse.left;
