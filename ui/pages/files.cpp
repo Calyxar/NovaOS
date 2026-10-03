@@ -5,6 +5,7 @@
 #include "../../kernel/drivers/video/framebuffer.h"
 #include "../../kernel/drivers/keyboard/keyboard.h"
 #include "../../kernel/fs/vfs.h"
+#include "../../kernel/fs/novafs_disk.h"
 
 #include <stdint.h>
 
@@ -35,6 +36,14 @@ int entryCount = 0;
 
 Rect backButton = {190, 125, 42, 42};
 Rect newFileButton = {620, 72, 110, 30};
+Rect newFolderButton = {485, 72, 125, 30};
+
+// The naming field is shown instead of directory cards while active.
+bool namingFolder = false;
+bool folderNameError = false;
+char folderName[NOVAFS_MAX_NAME] = "";
+int folderNameLength = 0;
+bool newFolderHovered = false;
 Rect saveButton = {620, 185, 110, 34};
 
 bool backHovered = false;
@@ -217,6 +226,32 @@ void draw_new_file_button() {
                            newFileButton.y + 8, NovaColors::TextPrimary);
 }
 
+void draw_new_folder_button() {
+    uint32_t background = newFolderHovered ? NovaColors::SurfaceHover
+                                            : NovaColors::SurfaceRaised;
+    Framebuffer::draw_rounded_rect(newFolderButton.x, newFolderButton.y,
+                                   newFolderButton.width, newFolderButton.height,
+                                   8, background);
+    Framebuffer::print_at("+ New Folder", newFolderButton.x + 8,
+                          newFolderButton.y + 8, NovaColors::TextPrimary);
+}
+
+void draw_folder_prompt() {
+    Framebuffer::print_at("Create folder", 190, 195, NovaColors::TextPrimary);
+    Framebuffer::draw_rounded_rect(190, 225, 400, 38, 8,
+                                   NovaColors::SurfaceRaised);
+    Framebuffer::print_at(folderName, 203, 237, NovaColors::TextPrimary);
+    Framebuffer::draw_rect(203 + folderNameLength * 8, 235, 2, 17,
+                           NovaColors::Cyan);
+    Framebuffer::print_at("Type name, Enter: create, Esc: cancel", 190, 282,
+                          NovaColors::TextSecondary);
+    if (folderNameError)
+        Framebuffer::print_at("Cannot create folder (duplicate, full, or invalid).",
+                              190, 310, NovaColors::TextPrimary);
+    Framebuffer::print_at("Maximum 27 characters; names cannot contain / or \\.",
+                          190, 339, NovaColors::TextMuted);
+}
+
 void draw_save_button() {
     uint32_t background = saveHovered ? NovaColors::SurfaceHover
                                       : NovaColors::SurfaceRaised;
@@ -244,6 +279,64 @@ void create_new_file() {
     VNode* file = VFS::create(fullPath);
     if (!file) return;
     load_directory();
+}
+
+void begin_new_folder() {
+    namingFolder = true;
+    folderNameError = false;
+    folderNameLength = 0;
+    folderName[0] = '\0';
+    esc_pressed = false;
+    // Clear any stale normal characters before entering a naming field.
+    char ignored;
+    while (Keyboard::try_getchar(&ignored)) {}
+}
+
+bool process_folder_keyboard() {
+    if (!namingFolder) return false;
+    bool changed = false;
+    if (esc_pressed) {
+        esc_pressed = false;
+        namingFolder = false;
+        folderNameError = false;
+        return true;
+    }
+    char c;
+    while (Keyboard::try_getchar(&c)) {
+        if (c == '\b') {
+            if (folderNameLength > 0) {
+                folderName[--folderNameLength] = '\0';
+                folderNameError = false;
+                changed = true;
+            }
+            continue;
+        }
+        if (c == '\n') {
+            if (folderNameLength == 0) {
+                folderNameError = true;
+                return true;
+            }
+            char fullPath[MAX_PATH];
+            if (!build_file_path(folderName, fullPath, MAX_PATH) ||
+                !VFS::mkdir(fullPath)) {
+                folderNameError = true;
+                return true;
+            }
+            namingFolder = false;
+            folderNameError = false;
+            load_directory();
+            return true;
+        }
+        // Avoid forbidden path separators and unsupported control characters.
+        if (c >= 32 && c <= 126 && c != '/' && c != '\\' &&
+            folderNameLength < NOVAFS_MAX_NAME - 1) {
+            folderName[folderNameLength++] = c;
+            folderName[folderNameLength] = '\0';
+            folderNameError = false;
+            changed = true;
+        }
+    }
+    return changed;
 }
 
 // Position is computed with the same wrap rules used by the renderer.
@@ -581,6 +674,11 @@ void FilesPage::init() {
     go_to_root();
     backHovered = false;
     newFileHovered = false;
+    newFolderHovered = false;
+    namingFolder = false;
+    folderNameError = false;
+    folderNameLength = 0;
+    folderName[0] = '\0';
     saveHovered = false;
     viewingFile = false;
     openedFileName[0] = '\0';
@@ -598,6 +696,7 @@ void FilesPage::init() {
 
 bool FilesPage::update() {
     // Desktop::run() must continue calling this EVERY loop on the Files page.
+    if (namingFolder) return process_folder_keyboard();
     return process_editor_keyboard();
 }
 
@@ -606,7 +705,10 @@ void FilesPage::draw() {
     Framebuffer::print_at(viewingFile ? "Edit NovaFS file" : "Browse NovaFS",
                            190, 98, NovaColors::TextSecondary);
     draw_back_button();
-    if (!viewingFile) draw_new_file_button();
+    if (!viewingFile) {
+        draw_new_file_button();
+        draw_new_folder_button();
+    }
 
     Framebuffer::draw_rounded_rect(245, 125, 485, 42, 8,
                                    NovaColors::SurfaceRaised);
@@ -617,6 +719,11 @@ void FilesPage::draw() {
                                NovaColors::TextPrimary);
         draw_save_button();
         draw_opened_file_content();
+        return;
+    }
+
+    if (namingFolder) {
+        draw_folder_prompt();
         return;
     }
 
@@ -631,14 +738,24 @@ void FilesPage::draw() {
 
 void FilesPage::handle_hover(int mouseX, int mouseY) {
     backHovered = backButton.contains(mouseX, mouseY);
-    newFileHovered = !viewingFile && newFileButton.contains(mouseX, mouseY);
+    newFileHovered = !viewingFile && !namingFolder &&
+                     newFileButton.contains(mouseX, mouseY);
+    newFolderHovered = !viewingFile && !namingFolder &&
+                       newFolderButton.contains(mouseX, mouseY);
     saveHovered = viewingFile && saveButton.contains(mouseX, mouseY);
-    if (viewingFile) return;
+    if (viewingFile || namingFolder) return;
     for (int i = 0; i < entryCount; ++i)
         entries[i].hovered = entries[i].bounds.contains(mouseX, mouseY);
 }
 
 void FilesPage::handle_click(int mouseX, int mouseY) {
+    if (namingFolder) {
+        if (backButton.contains(mouseX, mouseY)) {
+            namingFolder = false;
+            folderNameError = false;
+        }
+        return;
+    }
     if (backButton.contains(mouseX, mouseY)) {
         if (viewingFile) {
             // Never silently throw away an unsaved editor buffer.
@@ -656,6 +773,10 @@ void FilesPage::handle_click(int mouseX, int mouseY) {
 
     if (viewingFile && saveButton.contains(mouseX, mouseY)) {
         save_opened_file();
+        return;
+    }
+    if (!viewingFile && newFolderButton.contains(mouseX, mouseY)) {
+        begin_new_folder();
         return;
     }
     if (!viewingFile && newFileButton.contains(mouseX, mouseY)) {

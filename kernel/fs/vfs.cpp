@@ -1,589 +1,145 @@
 #include "vfs.h"
 
-
-// =============================================================
-// Configuration
-// =============================================================
-
 static constexpr int VFS_MAX_MOUNTS = 8;
-
-
-// =============================================================
-// VFS state
-// =============================================================
-
 static VFSMount mounts[VFS_MAX_MOUNTS];
 
-
-// =============================================================
-// String helpers
-// =============================================================
-
-static bool streq(
-    const char* a,
-    const char* b
-) {
+static bool streq(const char* a, const char* b) {
+    if (!a || !b) return false;
     while (*a && *b) {
-        if (*a != *b)
-            return false;
-
-        ++a;
-        ++b;
+        if (*a != *b) return false;
+        ++a; ++b;
     }
-
     return *a == *b;
 }
 
-
-static void strcopy(
-    char* dst,
-    const char* src,
-    int max
-) {
+static void strcopy(char* dst, const char* src, int max) {
     int i = 0;
-
-    while (
-        src[i] &&
-        i < max - 1
-    ) {
-        dst[i] = src[i];
-        ++i;
-    }
-
+    while (src[i] && i < max - 1) { dst[i] = src[i]; ++i; }
     dst[i] = '\0';
 }
 
-
-// =============================================================
-// Initialization
-// =============================================================
-
 void VFS::init() {
-    for (
-        int i = 0;
-        i < VFS_MAX_MOUNTS;
-        ++i
-    ) {
+    for (int i = 0; i < VFS_MAX_MOUNTS; ++i) {
         mounts[i].used = false;
-
         mounts[i].path[0] = '\0';
-
         mounts[i].root = nullptr;
     }
 }
 
-
-// =============================================================
-// Mounting
-// =============================================================
-
-bool VFS::mount(
-    const char* path,
-    VNode* fs_root
-) {
-    if (!path || !fs_root)
-        return false;
-
-    for (
-        int i = 0;
-        i < VFS_MAX_MOUNTS;
-        ++i
-    ) {
-        if (
-            mounts[i].used &&
-            streq(
-                mounts[i].path,
-                path
-            )
-        ) {
-            return false;
-        }
+bool VFS::mount(const char* path, VNode* fs_root) {
+    if (!path || !fs_root) return false;
+    for (int i = 0; i < VFS_MAX_MOUNTS; ++i)
+        if (mounts[i].used && streq(mounts[i].path, path)) return false;
+    for (int i = 0; i < VFS_MAX_MOUNTS; ++i) {
+        if (mounts[i].used) continue;
+        mounts[i].used = true;
+        strcopy(mounts[i].path, path, 256);
+        mounts[i].root = fs_root;
+        fs_root->flags |= VFS_NODE_MOUNTPOINT;
+        return true;
     }
-
-
-    for (
-        int i = 0;
-        i < VFS_MAX_MOUNTS;
-        ++i
-    ) {
-        if (!mounts[i].used) {
-            mounts[i].used = true;
-
-            strcopy(
-                mounts[i].path,
-                path,
-                256
-            );
-
-            mounts[i].root =
-                fs_root;
-
-            fs_root->flags |=
-                VFS_NODE_MOUNTPOINT;
-
-            return true;
-        }
-    }
-
     return false;
 }
 
-
-// =============================================================
-// Root mount lookup
-// =============================================================
-
 static VNode* get_root_mount() {
-    for (
-        int i = 0;
-        i < VFS_MAX_MOUNTS;
-        ++i
-    ) {
-        if (
-            mounts[i].used &&
-            streq(
-                mounts[i].path,
-                "/"
-            )
-        ) {
-            return mounts[i].root;
-        }
-    }
-
+    for (int i = 0; i < VFS_MAX_MOUNTS; ++i)
+        if (mounts[i].used && streq(mounts[i].path, "/")) return mounts[i].root;
     return nullptr;
 }
 
-
-// =============================================================
-// Path parsing
-// =============================================================
-
-VNode* VFS::resolve(
-    const char* path
-) {
-    if (!path)
-        return nullptr;
-
-    if (path[0] != '/')
-        return nullptr;
-
-
-    VNode* current =
-        get_root_mount();
-
-    if (!current)
-        return nullptr;
-
-
-    // Root path
-    if (
-        path[0] == '/' &&
-        path[1] == '\0'
-    ) {
-        return current;
-    }
-
-
+VNode* VFS::resolve(const char* path) {
+    if (!path || path[0] != '/') return nullptr;
+    VNode* current = get_root_mount();
+    if (!current) return nullptr;
+    if (path[1] == '\0') return current;
     char part[256];
-
     int pathIndex = 1;
-
-
-    while (
-        path[pathIndex] != '\0'
-    ) {
-
-        // Skip repeated slashes
-        while (
-            path[pathIndex] == '/'
-        ) {
-            ++pathIndex;
-        }
-
-
-        if (
-            path[pathIndex] == '\0'
-        ) {
-            break;
-        }
-
-
+    while (path[pathIndex] != '\0') {
+        while (path[pathIndex] == '/') ++pathIndex;
+        if (path[pathIndex] == '\0') break;
         int partIndex = 0;
-
-
-        while (
-            path[pathIndex] != '\0' &&
-            path[pathIndex] != '/' &&
-            partIndex < 255
-        ) {
-            part[partIndex++] =
-                path[pathIndex++];
-
-        }
-
-        part[partIndex] =
-            '\0';
-
-
-        if (
-            partIndex == 0
-        ) {
-            continue;
-        }
-
-
-        if (!current->finddir)
-            return nullptr;
-
-
-        current =
-            current->finddir(
-                current,
-                part
-            );
-
-
-        if (!current)
-            return nullptr;
+        while (path[pathIndex] && path[pathIndex] != '/' && partIndex < 255)
+            part[partIndex++] = path[pathIndex++];
+        // Reject overlong components rather than resolving a truncated name.
+        if (path[pathIndex] && path[pathIndex] != '/') return nullptr;
+        part[partIndex] = '\0';
+        if (!partIndex) continue;
+        if (!current->finddir) return nullptr;
+        current = current->finddir(current, part);
+        if (!current) return nullptr;
     }
-
-
     return current;
 }
 
-
-// =============================================================
-// Open
-// =============================================================
-
-VNode* VFS::open(
-    const char* path,
-    uint32_t flags
-) {
-    VNode* node =
-        resolve(path);
-
-    if (!node)
-        return nullptr;
-
-
-    if (node->open) {
-        int result =
-            node->open(
-                node,
-                flags
-            );
-
-        if (result < 0)
-            return nullptr;
-    }
-
-
+VNode* VFS::open(const char* path, uint32_t flags) {
+    VNode* node = resolve(path);
+    if (!node) return nullptr;
+    if (node->open && node->open(node, flags) < 0) return nullptr;
     return node;
 }
 
-// =============================================================
-// Create file
-// =============================================================
-
-VNode* VFS::create(
-    const char* path
-) {
-    if (!path)
-        return nullptr;
-
-    if (path[0] != '/')
-        return nullptr;
-
-
-    char parentPath[256];
-    char fileName[256];
-
-
+// Extract an absolute path's parent and final component; reject trailing slashes.
+static bool split_path(const char* path, char* parentPath, char* name) {
+    if (!path || path[0] != '/') return false;
     int length = 0;
-
-    while (
-        path[length] &&
-        length < 255
-    ) {
-        ++length;
-    }
-
-
-    if (length <= 1)
-        return nullptr;
-
-
-    int slashIndex =
-        length - 1;
-
-
-    while (
-        slashIndex > 0 &&
-        path[slashIndex] != '/'
-    ) {
-        --slashIndex;
-    }
-
-
-    // -------------------------
-    // Extract filename
-    // -------------------------
-
-    int fileIndex = 0;
-
-    for (
-        int i = slashIndex + 1;
-        path[i] &&
-        fileIndex < 255;
-        ++i
-    ) {
-        fileName[fileIndex++] =
-            path[i];
-    }
-
-    fileName[fileIndex] =
-        '\0';
-
-
-    if (
-        fileName[0] ==
-        '\0'
-    ) {
-        return nullptr;
-    }
-
-
-    // -------------------------
-    // Extract parent path
-    // -------------------------
-
+    while (path[length] && length < 256) ++length;
+    if (length <= 1 || length >= 256 || path[length - 1] == '/') return false;
+    int slashIndex = length - 1;
+    while (slashIndex > 0 && path[slashIndex] != '/') --slashIndex;
+    int nameLength = length - slashIndex - 1;
+    if (nameLength <= 0 || nameLength >= 256) return false;
+    for (int i = 0; i < nameLength; ++i) name[i] = path[slashIndex + 1 + i];
+    name[nameLength] = '\0';
     if (slashIndex == 0) {
-        parentPath[0] = '/';
-        parentPath[1] = '\0';
+        parentPath[0] = '/'; parentPath[1] = '\0';
+    } else {
+        for (int i = 0; i < slashIndex; ++i) parentPath[i] = path[i];
+        parentPath[slashIndex] = '\0';
     }
-
-    else {
-        int parentIndex = 0;
-
-        for (
-            int i = 0;
-            i < slashIndex &&
-            parentIndex < 255;
-            ++i
-        ) {
-            parentPath[parentIndex++] =
-                path[i];
-        }
-
-        parentPath[parentIndex] =
-            '\0';
-    }
-
-
-    // -------------------------
-    // Resolve parent
-    // -------------------------
-
-    VNode* parent =
-        resolve(
-            parentPath
-        );
-
-
-    if (!parent)
-        return nullptr;
-
-
-    if (
-        !is_directory(
-            parent
-        )
-    ) {
-        return nullptr;
-    }
-
-
-    // Already exists?
-    if (
-        parent->finddir &&
-        parent->finddir(
-            parent,
-            fileName
-        )
-    ) {
-        return nullptr;
-    }
-
-
-    if (!parent->create)
-        return nullptr;
-
-
-    return parent->create(
-        parent,
-        fileName
-    );
+    return true;
 }
 
-// =============================================================
-// Read
-// =============================================================
-
-int VFS::read(
-    VNode* node,
-    uint8_t* buffer,
-    size_t size,
-    size_t offset
-) {
-    if (!node)
-        return -1;
-
-    if (!buffer)
-        return -1;
-
-    if (!node->read)
-        return -1;
-
-
-    return node->read(
-        node,
-        buffer,
-        size,
-        offset
-    );
+VNode* VFS::create(const char* path) {
+    char parentPath[256], name[256];
+    if (!split_path(path, parentPath, name)) return nullptr;
+    VNode* parent = resolve(parentPath);
+    if (!is_directory(parent) || !parent->create) return nullptr;
+    if (parent->finddir && parent->finddir(parent, name)) return nullptr;
+    return parent->create(parent, name);
 }
 
-
-// =============================================================
-// Write
-// =============================================================
-
-int VFS::write(
-    VNode* node,
-    uint8_t* buffer,
-    size_t size,
-    size_t offset
-) {
-    if (!node)
-        return -1;
-
-    if (!buffer)
-        return -1;
-
-    if (!node->write)
-        return -1;
-
-
-    return node->write(
-        node,
-        buffer,
-        size,
-        offset
-    );
+VNode* VFS::mkdir(const char* path) {
+    char parentPath[256], name[256];
+    if (!split_path(path, parentPath, name)) return nullptr;
+    VNode* parent = resolve(parentPath);
+    if (!is_directory(parent) || !parent->mkdir) return nullptr;
+    if (parent->finddir && parent->finddir(parent, name)) return nullptr;
+    return parent->mkdir(parent, name);
 }
 
-
-// =============================================================
-// Close
-// =============================================================
-
-int VFS::close(
-    VNode* node
-) {
-    if (!node)
-        return -1;
-
-
-    if (node->close) {
-        return node->close(
-            node
-        );
-    }
-
-
-    return 0;
+int VFS::read(VNode* node, uint8_t* buffer, size_t size, size_t offset) {
+    if (!node || !buffer || !node->read) return -1;
+    return node->read(node, buffer, size, offset);
 }
-
-
-// =============================================================
-// Directory wrapper
-// =============================================================
-
-VNode* VFS::readdir(
-    VNode* node,
-    uint32_t index
-) {
-    if (!node)
-        return nullptr;
-
-    if (!is_directory(node))
-        return nullptr;
-
-    if (!node->readdir)
-        return nullptr;
-
-
-    return node->readdir(
-        node,
-        index
-    );
+int VFS::write(VNode* node, uint8_t* buffer, size_t size, size_t offset) {
+    if (!node || !buffer || !node->write) return -1;
+    return node->write(node, buffer, size, offset);
 }
-
-
-// =============================================================
-// Directory lookup wrapper
-// =============================================================
-
-VNode* VFS::finddir(
-    VNode* node,
-    const char* name
-) {
-    if (!node)
-        return nullptr;
-
-    if (!name)
-        return nullptr;
-
-    if (!is_directory(node))
-        return nullptr;
-
-    if (!node->finddir)
-        return nullptr;
-
-
-    return node->finddir(
-        node,
-        name
-    );
+int VFS::close(VNode* node) {
+    if (!node) return -1;
+    return node->close ? node->close(node) : 0;
 }
-
-
-// =============================================================
-// Type helpers
-// =============================================================
-
-bool VFS::is_file(
-    VNode* node
-) {
-    if (!node)
-        return false;
-
-
-    return
-        (node->flags &
-         VFS_NODE_FILE) != 0;
+VNode* VFS::readdir(VNode* node, uint32_t index) {
+    if (!is_directory(node) || !node->readdir) return nullptr;
+    return node->readdir(node, index);
 }
-
-
-bool VFS::is_directory(
-    VNode* node
-) {
-    if (!node)
-        return false;
-
-
-    return
-        (node->flags &
-         VFS_NODE_DIRECTORY) != 0;
+VNode* VFS::finddir(VNode* node, const char* name) {
+    if (!name || !is_directory(node) || !node->finddir) return nullptr;
+    return node->finddir(node, name);
+}
+bool VFS::is_file(VNode* node) {
+    return node && (node->flags & VFS_NODE_FILE) != 0;
+}
+bool VFS::is_directory(VNode* node) {
+    return node && (node->flags & VFS_NODE_DIRECTORY) != 0;
 }

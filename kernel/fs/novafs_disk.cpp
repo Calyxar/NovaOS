@@ -758,6 +758,15 @@ bool NovaFSDisk::create_directory(
 
         return false;
 
+    // Name must fit without truncation; no slash or dot segments.
+    int nameLength = 0;
+    for (; name[nameLength] && nameLength < NOVAFS_MAX_NAME; ++nameLength) {
+        if (name[nameLength] == '/' || name[nameLength] == '\\') return false;
+    }
+    if (nameLength == 0 || nameLength >= NOVAFS_MAX_NAME) return false;
+    if ((nameLength == 1 && name[0] == '.') ||
+        (nameLength == 2 && name[0] == '.' && name[1] == '.')) return false;
+
 
 
     if (!valid_parent(parent))
@@ -1029,6 +1038,14 @@ bool NovaFSDisk::save_file_in(
     if (!name || !name[0])
 
         return false;
+
+    int nameLength = 0;
+    for (; name[nameLength] && nameLength < NOVAFS_MAX_NAME; ++nameLength) {
+        if (name[nameLength] == '/' || name[nameLength] == '\\') return false;
+    }
+    if (nameLength == 0 || nameLength >= NOVAFS_MAX_NAME) return false;
+    if ((nameLength == 1 && name[0] == '.') ||
+        (nameLength == 2 && name[0] == '.' && name[1] == '.')) return false;
 
 
 

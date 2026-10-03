@@ -96,6 +96,11 @@ static VNode* novafs_finddir(
 
 );
 
+static VNode* novafs_mkdir(
+    VNode* directory,
+    const char* name
+);
+
 static VNode* novafs_create(
 
     VNode* directory,
@@ -387,6 +392,7 @@ static VNode* make_vnode(
     node->finddir = nullptr;
 
     node->create = nullptr;
+    node->mkdir = nullptr;
 
     // ---------------------------------------------------------
 
@@ -449,6 +455,8 @@ static VNode* make_vnode(
         node->create =
 
             novafs_create;
+
+        node->mkdir = novafs_mkdir;
 
     }
 
@@ -872,6 +880,29 @@ static VNode* novafs_create(
 
 // =============================================================
 
+// =============================================================
+// Create directory
+// =============================================================
+static VNode* novafs_mkdir(VNode* directory, const char* name) {
+    if (!directory || !name || !name[0] ||
+        (directory->flags & VFS_NODE_DIRECTORY) == 0)
+        return nullptr;
+
+    // NovaFS's 28-byte name field includes the terminating NUL.
+    int length = 0;
+    for (; name[length] && length < NOVAFS_MAX_NAME; ++length) {
+        if (name[length] == '/') return nullptr;
+    }
+    if (length == 0 || length >= NOVAFS_MAX_NAME) return nullptr;
+    if (directory->finddir && directory->finddir(directory, name)) return nullptr;
+
+    uint32_t parent = (directory == &rootNode)
+        ? NOVAFS_ROOT_PARENT : directory->inode;
+
+    if (!NovaFSDisk::create_directory(parent, name)) return nullptr;
+    return novafs_finddir(directory, name);
+}
+
 static void build_root_node() {
 
     clear_text(
@@ -939,6 +970,8 @@ static void build_root_node() {
     rootNode.create =
 
         novafs_create;
+
+    rootNode.mkdir = novafs_mkdir;
 
 }
 
