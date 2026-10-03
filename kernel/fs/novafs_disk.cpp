@@ -1651,6 +1651,32 @@ void NovaFSDisk::list_files(
 
 
 
+// Rename metadata in place: file data sectors, entry index and all
+// child parent indices remain unchanged.
+bool NovaFSDisk::rename_entry(uint32_t index, const char* new_name) {
+    if (!mounted || index >= NOVAFS_MAX_FILES || !new_name || !new_name[0])
+        return false;
+    if (!entries[index].name[0]) return false;
+
+    int length = 0;
+    for (; new_name[length] && length < NOVAFS_MAX_NAME; ++length) {
+        char c = new_name[length];
+        if (c == '/' || c == '\\' || c < 32 || c > 126) return false;
+    }
+    if (length == 0 || length >= NOVAFS_MAX_NAME) return false;
+    if ((length == 1 && new_name[0] == '.') ||
+        (length == 2 && new_name[0] == '.' && new_name[1] == '.'))
+        return false;
+
+    // Renaming to the same name is a successful no-op.
+    if (streq(entries[index].name, new_name)) return true;
+    if (find_entry(entries[index].parent, new_name) >= 0) return false;
+
+    strcopy(entries[index].name, new_name, NOVAFS_MAX_NAME);
+    sync();
+    return true;
+}
+
 bool NovaFSDisk::delete_file(
 
     const char* name

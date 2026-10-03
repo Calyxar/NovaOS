@@ -40,6 +40,8 @@ Rect newFolderButton = {485, 72, 125, 30};
 
 // The naming field is shown instead of directory cards while active.
 bool namingFolder = false;
+bool renamingEntry = false;
+char renameOriginal[MAX_NAME] = "";
 bool folderNameError = false;
 char folderName[NOVAFS_MAX_NAME] = "";
 int folderNameLength = 0;
@@ -192,6 +194,8 @@ void draw_folder(EntryCard& entry) {
                            36, 24, NovaColors::Cyan);
     Framebuffer::print_at(entry.name, entry.bounds.x + 16,
                            entry.bounds.y + 56, NovaColors::TextPrimary);
+    Framebuffer::print_at("R", entry.bounds.x + entry.bounds.width - 22,
+                           entry.bounds.y + 12, NovaColors::TextSecondary);
 }
 
 void draw_file(EntryCard& entry) {
@@ -204,6 +208,8 @@ void draw_file(EntryCard& entry) {
                            28, 34, NovaColors::Purple);
     Framebuffer::print_at(entry.name, entry.bounds.x + 16,
                            entry.bounds.y + 58, NovaColors::TextPrimary);
+    Framebuffer::print_at("R", entry.bounds.x + entry.bounds.width - 22,
+                           entry.bounds.y + 12, NovaColors::TextSecondary);
 }
 
 void draw_back_button() {
@@ -237,16 +243,18 @@ void draw_new_folder_button() {
 }
 
 void draw_folder_prompt() {
-    Framebuffer::print_at("Create folder", 190, 195, NovaColors::TextPrimary);
+    Framebuffer::print_at(renamingEntry ? "Rename item" : "Create folder",
+                           190, 195, NovaColors::TextPrimary);
     Framebuffer::draw_rounded_rect(190, 225, 400, 38, 8,
                                    NovaColors::SurfaceRaised);
     Framebuffer::print_at(folderName, 203, 237, NovaColors::TextPrimary);
     Framebuffer::draw_rect(203 + folderNameLength * 8, 235, 2, 17,
                            NovaColors::Cyan);
-    Framebuffer::print_at("Type name, Enter: create, Esc: cancel", 190, 282,
+    Framebuffer::print_at(renamingEntry ? "Enter: rename, Esc: cancel" : "Type name, Enter: create, Esc: cancel", 190, 282,
                           NovaColors::TextSecondary);
     if (folderNameError)
-        Framebuffer::print_at("Cannot create folder (duplicate, full, or invalid).",
+        Framebuffer::print_at(renamingEntry ? "Rename failed (duplicate or invalid name)." :
+                                            "Cannot create folder (duplicate, full, or invalid).",
                               190, 310, NovaColors::TextPrimary);
     Framebuffer::print_at("Maximum 27 characters; names cannot contain / or \\.",
                           190, 339, NovaColors::TextMuted);
@@ -283,6 +291,7 @@ void create_new_file() {
 
 void begin_new_folder() {
     namingFolder = true;
+    renamingEntry = false;
     folderNameError = false;
     folderNameLength = 0;
     folderName[0] = '\0';
@@ -292,12 +301,26 @@ void begin_new_folder() {
     while (Keyboard::try_getchar(&ignored)) {}
 }
 
+void begin_rename(const char* oldName) {
+    if (!oldName) return;
+    copy_text(renameOriginal, oldName, MAX_NAME);
+    copy_text(folderName, oldName, NOVAFS_MAX_NAME);
+    folderNameLength = text_length(folderName);
+    folderNameError = false;
+    renamingEntry = true;
+    namingFolder = false;
+    esc_pressed = false;
+    char ignored;
+    while (Keyboard::try_getchar(&ignored)) {}
+}
+
 bool process_folder_keyboard() {
-    if (!namingFolder) return false;
+    if (!namingFolder && !renamingEntry) return false;
     bool changed = false;
     if (esc_pressed) {
         esc_pressed = false;
         namingFolder = false;
+        renamingEntry = false;
         folderNameError = false;
         return true;
     }
@@ -317,12 +340,20 @@ bool process_folder_keyboard() {
                 return true;
             }
             char fullPath[MAX_PATH];
-            if (!build_file_path(folderName, fullPath, MAX_PATH) ||
-                !VFS::mkdir(fullPath)) {
+            bool success = false;
+            if (renamingEntry) {
+                if (build_file_path(renameOriginal, fullPath, MAX_PATH))
+                    success = VFS::rename(fullPath, folderName);
+            } else {
+                if (build_file_path(folderName, fullPath, MAX_PATH))
+                    success = VFS::mkdir(fullPath) != nullptr;
+            }
+            if (!success) {
                 folderNameError = true;
                 return true;
             }
             namingFolder = false;
+            renamingEntry = false;
             folderNameError = false;
             load_directory();
             return true;
@@ -676,6 +707,7 @@ void FilesPage::init() {
     newFileHovered = false;
     newFolderHovered = false;
     namingFolder = false;
+    renamingEntry = false;
     folderNameError = false;
     folderNameLength = 0;
     folderName[0] = '\0';
@@ -696,7 +728,7 @@ void FilesPage::init() {
 
 bool FilesPage::update() {
     // Desktop::run() must continue calling this EVERY loop on the Files page.
-    if (namingFolder) return process_folder_keyboard();
+    if (namingFolder || renamingEntry) return process_folder_keyboard();
     return process_editor_keyboard();
 }
 
@@ -722,7 +754,7 @@ void FilesPage::draw() {
         return;
     }
 
-    if (namingFolder) {
+    if (namingFolder || renamingEntry) {
         draw_folder_prompt();
         return;
     }
@@ -738,20 +770,21 @@ void FilesPage::draw() {
 
 void FilesPage::handle_hover(int mouseX, int mouseY) {
     backHovered = backButton.contains(mouseX, mouseY);
-    newFileHovered = !viewingFile && !namingFolder &&
+    newFileHovered = !viewingFile && !namingFolder && !renamingEntry &&
                      newFileButton.contains(mouseX, mouseY);
-    newFolderHovered = !viewingFile && !namingFolder &&
+    newFolderHovered = !viewingFile && !namingFolder && !renamingEntry &&
                        newFolderButton.contains(mouseX, mouseY);
     saveHovered = viewingFile && saveButton.contains(mouseX, mouseY);
-    if (viewingFile || namingFolder) return;
+    if (viewingFile || namingFolder || renamingEntry) return;
     for (int i = 0; i < entryCount; ++i)
         entries[i].hovered = entries[i].bounds.contains(mouseX, mouseY);
 }
 
 void FilesPage::handle_click(int mouseX, int mouseY) {
-    if (namingFolder) {
+    if (namingFolder || renamingEntry) {
         if (backButton.contains(mouseX, mouseY)) {
             namingFolder = false;
+            renamingEntry = false;
             folderNameError = false;
         }
         return;
@@ -787,6 +820,12 @@ void FilesPage::handle_click(int mouseX, int mouseY) {
 
     for (int i = 0; i < entryCount; ++i) {
         if (!entries[i].bounds.contains(mouseX, mouseY)) continue;
+        // Click the R at the top-right of any card to rename in place.
+        if (mouseX >= entries[i].bounds.x + entries[i].bounds.width - 32 &&
+            mouseY < entries[i].bounds.y + 32) {
+            begin_rename(entries[i].name);
+            return;
+        }
         if (entries[i].directory) open_directory(entries[i].name);
         else open_file(entries[i].name);
         return;

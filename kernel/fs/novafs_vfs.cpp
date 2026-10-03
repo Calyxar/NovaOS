@@ -101,6 +101,8 @@ static VNode* novafs_mkdir(
     const char* name
 );
 
+static bool novafs_rename(VNode* node, const char* newName);
+
 static VNode* novafs_create(
 
     VNode* directory,
@@ -393,6 +395,7 @@ static VNode* make_vnode(
 
     node->create = nullptr;
     node->mkdir = nullptr;
+    node->rename = novafs_rename;
 
     // ---------------------------------------------------------
 
@@ -903,6 +906,14 @@ static VNode* novafs_mkdir(VNode* directory, const char* name) {
     return novafs_finddir(directory, name);
 }
 
+// Disk metadata rename; keep this live VNode's name in sync as well.
+static bool novafs_rename(VNode* node, const char* newName) {
+    if (!node || !newName || node == &rootNode) return false;
+    if (!NovaFSDisk::rename_entry(node->inode, newName)) return false;
+    copy_text(node->name, newName, 256);
+    return true;
+}
+
 static void build_root_node() {
 
     clear_text(
@@ -972,6 +983,7 @@ static void build_root_node() {
         novafs_create;
 
     rootNode.mkdir = novafs_mkdir;
+    rootNode.rename = nullptr;
 
 }
 

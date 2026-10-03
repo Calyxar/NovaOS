@@ -117,6 +117,20 @@ VNode* VFS::mkdir(const char* path) {
     return parent->mkdir(parent, name);
 }
 
+// Rename a file or directory in place. newName is a single component,
+// not a destination path (moving entries is a separate future operation).
+bool VFS::rename(const char* oldPath, const char* newName) {
+    if (!oldPath || !newName || !newName[0]) return false;
+    if (streq(oldPath, "/")) return false;
+    for (int i = 0; newName[i]; ++i)
+        if (newName[i] == '/' || newName[i] == '\\') return false;
+    if (streq(newName, ".") || streq(newName, "..")) return false;
+    VNode* node = resolve(oldPath);
+    if (!node || !node->rename || (node->flags & VFS_NODE_MOUNTPOINT))
+        return false;
+    return node->rename(node, newName);
+}
+
 int VFS::read(VNode* node, uint8_t* buffer, size_t size, size_t offset) {
     if (!node || !buffer || !node->read) return -1;
     return node->read(node, buffer, size, offset);
