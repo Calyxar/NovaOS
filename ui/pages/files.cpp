@@ -23,6 +23,17 @@ constexpr int EDITOR_COLUMNS = 66;
 constexpr int EDITOR_VISIBLE_ROWS = 17;
 constexpr int EDITOR_ROW_HEIGHT = 20;
 
+// Directory card viewport. Three rows fit fully inside 800x600.
+constexpr int FILE_COLUMNS = 3;
+constexpr int FILE_VISIBLE_ROWS = 3;
+constexpr int FILE_CARD_START_X = 190;
+constexpr int FILE_CARD_START_Y = 190;
+constexpr int FILE_CARD_WIDTH = 150;
+constexpr int FILE_CARD_HEIGHT = 90;
+constexpr int FILE_CARD_GAP_X = 20;
+constexpr int FILE_CARD_GAP_Y = 20;
+constexpr int FILE_ROW_STEP = FILE_CARD_HEIGHT + FILE_CARD_GAP_Y;
+
 struct EntryCard {
     Rect bounds;
     char name[MAX_NAME];
@@ -33,6 +44,12 @@ struct EntryCard {
 
 EntryCard entries[MAX_ENTRIES];
 int entryCount = 0;
+
+int directoryScrollRow = 0;
+Rect scrollUpButton = {700, 200, 30, 30};
+Rect scrollDownButton = {700, 460, 30, 30};
+bool scrollUpHovered = false;
+bool scrollDownHovered = false;
 
 Rect backButton = {190, 125, 42, 42};
 Rect newFileButton = {620, 72, 110, 30};
@@ -165,13 +182,59 @@ void clear_entries() {
 
 void layout_entries() {
     for (int i = 0; i < entryCount; ++i) {
+        int absoluteRow = i / FILE_COLUMNS;
+        int visibleRow = absoluteRow - directoryScrollRow;
         entries[i].bounds = {
-            190 + (i % 3) * 170,
-            190 + (i / 3) * 110,
-            150,
-            90
+            FILE_CARD_START_X + (i % FILE_COLUMNS) *
+                (FILE_CARD_WIDTH + FILE_CARD_GAP_X),
+            FILE_CARD_START_Y + visibleRow * FILE_ROW_STEP,
+            FILE_CARD_WIDTH,
+            FILE_CARD_HEIGHT
         };
     }
+}
+
+int directory_row_count() {
+    if (entryCount <= 0) return 0;
+    return (entryCount + FILE_COLUMNS - 1) / FILE_COLUMNS;
+}
+
+int max_directory_scroll_row() {
+    int rows = directory_row_count();
+    int maxRow = rows - FILE_VISIBLE_ROWS;
+    return maxRow > 0 ? maxRow : 0;
+}
+
+bool directory_can_scroll_up() {
+    return directoryScrollRow > 0;
+}
+
+bool directory_can_scroll_down() {
+    return directoryScrollRow < max_directory_scroll_row();
+}
+
+bool entry_is_visible(int index) {
+    if (index < 0 || index >= entryCount) return false;
+    int row = index / FILE_COLUMNS;
+    return row >= directoryScrollRow &&
+           row < directoryScrollRow + FILE_VISIBLE_ROWS;
+}
+
+bool scroll_directory(int delta) {
+    int next = directoryScrollRow + delta;
+    if (next < 0) next = 0;
+    int maxRow = max_directory_scroll_row();
+    if (next > maxRow) next = maxRow;
+    if (next == directoryScrollRow) return false;
+
+    directoryScrollRow = next;
+    layout_entries();
+    return true;
+}
+
+void reset_directory_scroll() {
+    directoryScrollRow = 0;
+    layout_entries();
 }
 
 void load_directory() {
@@ -189,6 +252,7 @@ void load_directory() {
         entry.hovered = false;
         ++entryCount;
     }
+    directoryScrollRow = 0;
     layout_entries();
 }
 
@@ -224,6 +288,66 @@ void draw_file(EntryCard& entry) {
                            entry.bounds.y + 12, NovaColors::TextSecondary);
     Framebuffer::print_at("R", entry.bounds.x + entry.bounds.width - 22,
                            entry.bounds.y + 12, NovaColors::TextSecondary);
+}
+
+void draw_scroll_controls() {
+    if (max_directory_scroll_row() <= 0) return;
+
+    uint32_t upBackground = scrollUpHovered
+        ? NovaColors::SurfaceHover : NovaColors::SurfaceRaised;
+    uint32_t downBackground = scrollDownHovered
+        ? NovaColors::SurfaceHover : NovaColors::SurfaceRaised;
+
+    Framebuffer::draw_rounded_rect(
+        scrollUpButton.x, scrollUpButton.y,
+        scrollUpButton.width, scrollUpButton.height, 7, upBackground);
+    Framebuffer::draw_rounded_rect(
+        scrollDownButton.x, scrollDownButton.y,
+        scrollDownButton.width, scrollDownButton.height, 7, downBackground);
+
+    Framebuffer::print_at("^", scrollUpButton.x + 10, scrollUpButton.y + 8,
+                          directory_can_scroll_up()
+                              ? NovaColors::TextPrimary
+                              : NovaColors::TextMuted);
+    Framebuffer::print_at("v", scrollDownButton.x + 10, scrollDownButton.y + 8,
+                          directory_can_scroll_down()
+                              ? NovaColors::TextPrimary
+                              : NovaColors::TextMuted);
+}
+
+void draw_directory_scroll_status() {
+    if (entryCount <= FILE_COLUMNS * FILE_VISIBLE_ROWS) return;
+
+    int first = directoryScrollRow * FILE_COLUMNS + 1;
+    int last = first + FILE_COLUMNS * FILE_VISIBLE_ROWS - 1;
+    if (last > entryCount) last = entryCount;
+
+    char status[32];
+    int pos = 0;
+
+    auto append_number = [&](int value) {
+        char temp[12];
+        int count = 0;
+        if (value == 0) temp[count++] = '0';
+        while (value > 0 && count < 11) {
+            temp[count++] = (char)('0' + (value % 10));
+            value /= 10;
+        }
+        while (count > 0 && pos < 31) status[pos++] = temp[--count];
+    };
+
+    append_number(first);
+    if (pos < 31) status[pos++] = '-';
+    append_number(last);
+    if (pos < 31) status[pos++] = ' ';
+    if (pos < 31) status[pos++] = 'o';
+    if (pos < 31) status[pos++] = 'f';
+    if (pos < 31) status[pos++] = ' ';
+    append_number(entryCount);
+    status[pos] = '\0';
+
+    Framebuffer::print_at(status, 190, 560, NovaColors::TextMuted);
+    Framebuffer::print_at("Up/Down: scroll", 560, 560, NovaColors::TextMuted);
 }
 
 void draw_back_button() {
@@ -652,6 +776,55 @@ bool move_end() {
     return true;
 }
 
+bool process_directory_keyboard() {
+    if (viewingFile || namingFolder || renamingEntry || deletingEntry)
+        return false;
+
+    bool changed = false;
+
+    // Ordinary characters have no meaning while browsing; discard them so
+    // they cannot leak into a file editor or naming field opened later.
+    char ignored;
+    while (Keyboard::try_getchar(&ignored)) {}
+
+    if (up_pressed) {
+        up_pressed = false;
+        changed = scroll_directory(-1) || changed;
+    }
+
+    if (down_pressed) {
+        down_pressed = false;
+        changed = scroll_directory(+1) || changed;
+    }
+
+    if (home_pressed) {
+        home_pressed = false;
+        if (directoryScrollRow != 0) {
+            directoryScrollRow = 0;
+            layout_entries();
+            changed = true;
+        }
+    }
+
+    if (end_pressed) {
+        end_pressed = false;
+        int last = max_directory_scroll_row();
+        if (directoryScrollRow != last) {
+            directoryScrollRow = last;
+            layout_entries();
+            changed = true;
+        }
+    }
+
+    // These special-key flags are editor-only here; clear stale presses.
+    left_pressed = false;
+    right_pressed = false;
+    delete_pressed = false;
+    save_pressed = false;
+
+    return changed;
+}
+
 bool process_editor_keyboard() {
     if (!viewingFile) return false;
     bool changed = false;
@@ -802,6 +975,9 @@ void close_file() {
 
 void FilesPage::init() {
     go_to_root();
+    directoryScrollRow = 0;
+    scrollUpHovered = false;
+    scrollDownHovered = false;
     backHovered = false;
     newFileHovered = false;
     newFolderHovered = false;
@@ -835,7 +1011,8 @@ bool FilesPage::update() {
     // Desktop::run() must continue calling this EVERY loop on the Files page.
     if (deletingEntry) return process_delete_keyboard();
     if (namingFolder || renamingEntry) return process_folder_keyboard();
-    return process_editor_keyboard();
+    if (viewingFile) return process_editor_keyboard();
+    return process_directory_keyboard();
 }
 
 void FilesPage::draw() {
@@ -871,9 +1048,14 @@ void FilesPage::draw() {
     }
 
     for (int i = 0; i < entryCount; ++i) {
+        if (!entry_is_visible(i)) continue;
         if (entries[i].directory) draw_folder(entries[i]);
         else draw_file(entries[i]);
     }
+
+    draw_scroll_controls();
+    draw_directory_scroll_status();
+
     if (entryCount == 0)
         Framebuffer::print_at("This folder is empty.", 190, 200,
                                NovaColors::TextMuted);
@@ -888,9 +1070,16 @@ void FilesPage::handle_hover(int mouseX, int mouseY) {
     saveHovered = viewingFile && saveButton.contains(mouseX, mouseY);
     deleteConfirmHovered = deletingEntry && deleteConfirmButton.contains(mouseX, mouseY);
     deleteCancelHovered = deletingEntry && deleteCancelButton.contains(mouseX, mouseY);
+    scrollUpHovered = !viewingFile && !namingFolder && !renamingEntry &&
+                      !deletingEntry && directory_can_scroll_up() &&
+                      scrollUpButton.contains(mouseX, mouseY);
+    scrollDownHovered = !viewingFile && !namingFolder && !renamingEntry &&
+                        !deletingEntry && directory_can_scroll_down() &&
+                        scrollDownButton.contains(mouseX, mouseY);
     if (viewingFile || namingFolder || renamingEntry || deletingEntry) return;
     for (int i = 0; i < entryCount; ++i)
-        entries[i].hovered = entries[i].bounds.contains(mouseX, mouseY);
+        entries[i].hovered = entry_is_visible(i) &&
+                             entries[i].bounds.contains(mouseX, mouseY);
 }
 
 void FilesPage::handle_click(int mouseX, int mouseY) {
@@ -944,7 +1133,17 @@ void FilesPage::handle_click(int mouseX, int mouseY) {
     }
     if (viewingFile) return;
 
+    if (scrollUpButton.contains(mouseX, mouseY)) {
+        scroll_directory(-1);
+        return;
+    }
+    if (scrollDownButton.contains(mouseX, mouseY)) {
+        scroll_directory(+1);
+        return;
+    }
+
     for (int i = 0; i < entryCount; ++i) {
+        if (!entry_is_visible(i)) continue;
         if (!entries[i].bounds.contains(mouseX, mouseY)) continue;
         // D and R controls live in the top-right of each card.
         if (mouseY < entries[i].bounds.y + 32) {
