@@ -43,6 +43,16 @@ bool namingFolder = false;
 bool renamingEntry = false;
 char renameOriginal[MAX_NAME] = "";
 bool folderNameError = false;
+
+// Delete confirmation modal. NovaFS only permits files and empty folders.
+bool deletingEntry = false;
+char deleteName[MAX_NAME] = "";
+bool deleteIsDirectory = false;
+bool deleteError = false;
+Rect deleteConfirmButton = {330, 315, 120, 34};
+Rect deleteCancelButton = {470, 315, 120, 34};
+bool deleteConfirmHovered = false;
+bool deleteCancelHovered = false;
 char folderName[NOVAFS_MAX_NAME] = "";
 int folderNameLength = 0;
 bool newFolderHovered = false;
@@ -194,6 +204,8 @@ void draw_folder(EntryCard& entry) {
                            36, 24, NovaColors::Cyan);
     Framebuffer::print_at(entry.name, entry.bounds.x + 16,
                            entry.bounds.y + 56, NovaColors::TextPrimary);
+    Framebuffer::print_at("D", entry.bounds.x + entry.bounds.width - 44,
+                           entry.bounds.y + 12, NovaColors::TextSecondary);
     Framebuffer::print_at("R", entry.bounds.x + entry.bounds.width - 22,
                            entry.bounds.y + 12, NovaColors::TextSecondary);
 }
@@ -208,6 +220,8 @@ void draw_file(EntryCard& entry) {
                            28, 34, NovaColors::Purple);
     Framebuffer::print_at(entry.name, entry.bounds.x + 16,
                            entry.bounds.y + 58, NovaColors::TextPrimary);
+    Framebuffer::print_at("D", entry.bounds.x + entry.bounds.width - 44,
+                           entry.bounds.y + 12, NovaColors::TextSecondary);
     Framebuffer::print_at("R", entry.bounds.x + entry.bounds.width - 22,
                            entry.bounds.y + 12, NovaColors::TextSecondary);
 }
@@ -258,6 +272,37 @@ void draw_folder_prompt() {
                               190, 310, NovaColors::TextPrimary);
     Framebuffer::print_at("Maximum 27 characters; names cannot contain / or \\.",
                           190, 339, NovaColors::TextMuted);
+}
+
+void draw_delete_prompt() {
+    Framebuffer::print_at("Delete item?", 190, 205, NovaColors::TextPrimary);
+    Framebuffer::print_at(deleteName, 190, 235, NovaColors::Cyan);
+    Framebuffer::print_at(deleteIsDirectory ? "Folder must be empty before it can be deleted."
+                                           : "This file will be permanently removed.",
+                           190, 265, NovaColors::TextSecondary);
+
+    uint32_t deleteBg = deleteConfirmHovered ? NovaColors::SurfaceHover
+                                             : NovaColors::SurfaceRaised;
+    uint32_t cancelBg = deleteCancelHovered ? NovaColors::SurfaceHover
+                                            : NovaColors::SurfaceRaised;
+
+    Framebuffer::draw_rounded_rect(deleteConfirmButton.x, deleteConfirmButton.y,
+                                   deleteConfirmButton.width, deleteConfirmButton.height,
+                                   8, deleteBg);
+    Framebuffer::print_at("Delete", deleteConfirmButton.x + 28,
+                           deleteConfirmButton.y + 10, NovaColors::TextPrimary);
+
+    Framebuffer::draw_rounded_rect(deleteCancelButton.x, deleteCancelButton.y,
+                                   deleteCancelButton.width, deleteCancelButton.height,
+                                   8, cancelBg);
+    Framebuffer::print_at("Cancel", deleteCancelButton.x + 28,
+                           deleteCancelButton.y + 10, NovaColors::TextPrimary);
+
+    Framebuffer::print_at("Enter: delete   Esc: cancel", 190, 375,
+                           NovaColors::TextMuted);
+    if (deleteError)
+        Framebuffer::print_at("Delete failed. Non-empty folders cannot be deleted.",
+                               190, 405, NovaColors::TextPrimary);
 }
 
 void draw_save_button() {
@@ -312,6 +357,60 @@ void begin_rename(const char* oldName) {
     esc_pressed = false;
     char ignored;
     while (Keyboard::try_getchar(&ignored)) {}
+}
+
+void cancel_delete() {
+    deletingEntry = false;
+    deleteName[0] = '\0';
+    deleteIsDirectory = false;
+    deleteError = false;
+    deleteConfirmHovered = false;
+    deleteCancelHovered = false;
+}
+
+void begin_delete(const char* name, bool directory) {
+    if (!name) return;
+    copy_text(deleteName, name, MAX_NAME);
+    deleteIsDirectory = directory;
+    deleteError = false;
+    deletingEntry = true;
+    deleteConfirmHovered = false;
+    deleteCancelHovered = false;
+    esc_pressed = false;
+    char ignored;
+    while (Keyboard::try_getchar(&ignored)) {}
+}
+
+bool execute_delete() {
+    char fullPath[MAX_PATH];
+    if (!build_file_path(deleteName, fullPath, MAX_PATH)) {
+        deleteError = true;
+        return false;
+    }
+    if (!VFS::remove(fullPath)) {
+        deleteError = true;
+        return false;
+    }
+    cancel_delete();
+    load_directory();
+    return true;
+}
+
+bool process_delete_keyboard() {
+    if (!deletingEntry) return false;
+    if (esc_pressed) {
+        esc_pressed = false;
+        cancel_delete();
+        return true;
+    }
+    char c;
+    while (Keyboard::try_getchar(&c)) {
+        if (c == '\n') {
+            execute_delete();
+            return true;
+        }
+    }
+    return false;
 }
 
 bool process_folder_keyboard() {
@@ -709,6 +808,12 @@ void FilesPage::init() {
     namingFolder = false;
     renamingEntry = false;
     folderNameError = false;
+    deletingEntry = false;
+    deleteName[0] = '\0';
+    deleteIsDirectory = false;
+    deleteError = false;
+    deleteConfirmHovered = false;
+    deleteCancelHovered = false;
     folderNameLength = 0;
     folderName[0] = '\0';
     saveHovered = false;
@@ -728,6 +833,7 @@ void FilesPage::init() {
 
 bool FilesPage::update() {
     // Desktop::run() must continue calling this EVERY loop on the Files page.
+    if (deletingEntry) return process_delete_keyboard();
     if (namingFolder || renamingEntry) return process_folder_keyboard();
     return process_editor_keyboard();
 }
@@ -754,6 +860,11 @@ void FilesPage::draw() {
         return;
     }
 
+    if (deletingEntry) {
+        draw_delete_prompt();
+        return;
+    }
+
     if (namingFolder || renamingEntry) {
         draw_folder_prompt();
         return;
@@ -775,12 +886,27 @@ void FilesPage::handle_hover(int mouseX, int mouseY) {
     newFolderHovered = !viewingFile && !namingFolder && !renamingEntry &&
                        newFolderButton.contains(mouseX, mouseY);
     saveHovered = viewingFile && saveButton.contains(mouseX, mouseY);
-    if (viewingFile || namingFolder || renamingEntry) return;
+    deleteConfirmHovered = deletingEntry && deleteConfirmButton.contains(mouseX, mouseY);
+    deleteCancelHovered = deletingEntry && deleteCancelButton.contains(mouseX, mouseY);
+    if (viewingFile || namingFolder || renamingEntry || deletingEntry) return;
     for (int i = 0; i < entryCount; ++i)
         entries[i].hovered = entries[i].bounds.contains(mouseX, mouseY);
 }
 
 void FilesPage::handle_click(int mouseX, int mouseY) {
+    if (deletingEntry) {
+        if (deleteConfirmButton.contains(mouseX, mouseY)) {
+            execute_delete();
+            return;
+        }
+        if (deleteCancelButton.contains(mouseX, mouseY) ||
+            backButton.contains(mouseX, mouseY)) {
+            cancel_delete();
+            return;
+        }
+        return;
+    }
+
     if (namingFolder || renamingEntry) {
         if (backButton.contains(mouseX, mouseY)) {
             namingFolder = false;
@@ -820,11 +946,18 @@ void FilesPage::handle_click(int mouseX, int mouseY) {
 
     for (int i = 0; i < entryCount; ++i) {
         if (!entries[i].bounds.contains(mouseX, mouseY)) continue;
-        // Click the R at the top-right of any card to rename in place.
-        if (mouseX >= entries[i].bounds.x + entries[i].bounds.width - 32 &&
-            mouseY < entries[i].bounds.y + 32) {
-            begin_rename(entries[i].name);
-            return;
+        // D and R controls live in the top-right of each card.
+        if (mouseY < entries[i].bounds.y + 32) {
+            int controlX = mouseX - entries[i].bounds.x;
+            if (controlX >= entries[i].bounds.width - 54 &&
+                controlX < entries[i].bounds.width - 32) {
+                begin_delete(entries[i].name, entries[i].directory);
+                return;
+            }
+            if (controlX >= entries[i].bounds.width - 32) {
+                begin_rename(entries[i].name);
+                return;
+            }
         }
         if (entries[i].directory) open_directory(entries[i].name);
         else open_file(entries[i].name);

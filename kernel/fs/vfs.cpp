@@ -131,6 +131,16 @@ bool VFS::rename(const char* oldPath, const char* newName) {
     return node->rename(node, newName);
 }
 
+// Remove a file or empty directory. Filesystem backends decide whether
+// removal is legal; NovaFS refuses non-empty directories.
+bool VFS::remove(const char* path) {
+    if (!path || streq(path, "/")) return false;
+    VNode* node = resolve(path);
+    if (!node || !node->remove || (node->flags & VFS_NODE_MOUNTPOINT))
+        return false;
+    return node->remove(node);
+}
+
 int VFS::read(VNode* node, uint8_t* buffer, size_t size, size_t offset) {
     if (!node || !buffer || !node->read) return -1;
     return node->read(node, buffer, size, offset);

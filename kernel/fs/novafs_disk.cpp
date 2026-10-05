@@ -1733,6 +1733,24 @@ bool NovaFSDisk::delete_file(
 
 
 
+bool NovaFSDisk::delete_entry_in(
+    uint32_t parent,
+    const char* name
+) {
+    if (!mounted || !name || !name[0])
+        return false;
+
+    if (!valid_parent(parent))
+        return false;
+
+    int index = find_entry(parent, name);
+    if (index < 0)
+        return false;
+
+    return delete_entry((uint32_t)index);
+}
+
+
 bool NovaFSDisk::delete_entry(
 
     uint32_t index

@@ -27,5 +27,6 @@ namespace NovaFSDisk {
     bool rename_entry(uint32_t index, const char* new_name);
     bool delete_file(const char* name);
     bool delete_entry(uint32_t index);
+    bool delete_entry_in(uint32_t parent, const char* name);
     void sync();
 }

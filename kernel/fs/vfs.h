@@ -21,6 +21,7 @@ typedef VNode* (*VNodeFindDirFn)(VNode*, const char*);
 typedef VNode* (*VNodeCreateFn)(VNode*, const char*);
 typedef VNode* (*VNodeMkdirFn)(VNode*, const char*);
 typedef bool (*VNodeRenameFn)(VNode*, const char*);
+typedef bool (*VNodeRemoveFn)(VNode*);
 
 struct VNode {
     char name[256];
@@ -35,6 +36,7 @@ struct VNode {
     VNodeCreateFn create;
     VNodeMkdirFn mkdir; // Directory creation callback
     VNodeRenameFn rename; // Rename this entry (not the mount root)
+    VNodeRemoveFn remove; // Remove this file or empty directory
 };
 
 struct VFSMount {
@@ -52,6 +54,7 @@ namespace VFS {
     VNode* create(const char* path);
     VNode* mkdir(const char* path);
     bool rename(const char* oldPath, const char* newName);
+    bool remove(const char* path);
     int read(VNode* node, uint8_t* buffer, size_t size, size_t offset);
     int write(VNode* node, uint8_t* buffer, size_t size, size_t offset);
     VNode* readdir(VNode* node, uint32_t index);

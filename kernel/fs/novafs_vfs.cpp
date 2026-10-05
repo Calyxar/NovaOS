@@ -102,6 +102,7 @@ static VNode* novafs_mkdir(
 );
 
 static bool novafs_rename(VNode* node, const char* newName);
+static bool novafs_remove(VNode* node);
 
 static VNode* novafs_create(
 
@@ -396,6 +397,7 @@ static VNode* make_vnode(
     node->create = nullptr;
     node->mkdir = nullptr;
     node->rename = novafs_rename;
+    node->remove = novafs_remove;
 
     // ---------------------------------------------------------
 
@@ -914,6 +916,20 @@ static bool novafs_rename(VNode* node, const char* newName) {
     return true;
 }
 
+// Delete a file or an empty directory. The disk layer refuses
+// non-empty directories so child entries cannot be orphaned.
+static bool novafs_remove(VNode* node) {
+    if (!node || node == &rootNode || (node->flags & VFS_NODE_MOUNTPOINT))
+        return false;
+
+    // Resolve the entry again by its real NovaFS parent + name.
+    // This avoids relying on a reused/cached VNode inode when deleting
+    // directories. NovaFSDisk::delete_entry() still refuses non-empty
+    // directories, so recursive deletion is not introduced here.
+    uint32_t parent = (uint32_t)(uintptr_t)node->fs_data;
+    return NovaFSDisk::delete_entry_in(parent, node->name);
+}
+
 static void build_root_node() {
 
     clear_text(
@@ -984,6 +1000,7 @@ static void build_root_node() {
 
     rootNode.mkdir = novafs_mkdir;
     rootNode.rename = nullptr;
+    rootNode.remove = nullptr;
 
 }
 
