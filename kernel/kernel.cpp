@@ -9,6 +9,10 @@
 #include "drivers/timer/pit.h"
 #include "drivers/mouse/mouse.h"
 #include "drivers/disk/ata.h"
+#include "drivers/video/font_renderer.h"
+
+#include "user/user.h"
+#include "user/session.h"
 
 #include "fs/vfs.h"
 #include "fs/novafs_vfs.h"
@@ -23,6 +27,8 @@
 
 #include "../shell/splash.h"
 #include "../ui/shell/desktop.h"
+#include "../ui/pages/login.h"
+#include "../ui/pages/setup.h"
 
 // ----------------------------------------------------
 // Serial debug output
@@ -221,16 +227,19 @@ extern "C" void kernel_main(
             serial_print("Initializing VESA framebuffer...\n");
 
             Framebuffer::init_vesa(
-                (uint32_t*)(uint32_t)mbi->framebuffer_addr,
-                mbi->framebuffer_width,
-                mbi->framebuffer_height,
-                mbi->framebuffer_pitch,
-                mbi->framebuffer_bpp
-            );
+    (uint32_t*)(uint32_t)mbi->framebuffer_addr,
+    mbi->framebuffer_width,
+    mbi->framebuffer_height,
+    mbi->framebuffer_pitch,
+    mbi->framebuffer_bpp
+);
 
-            serial_print("VESA framebuffer ready\n");
+serial_print("VESA framebuffer ready\n");
 
-            got_vesa = true;
+serial_print("Initializing modern font renderer\n");
+FontRenderer::init();
+
+got_vesa = true;
         }
 
     } else {
@@ -389,6 +398,16 @@ if (documentsDir >= 0) {
 }
 
     // ------------------------------------------------
+// NovaOS User & Session subsystem
+// ------------------------------------------------
+
+serial_print("Initializing user subsystem\n");
+User::init();
+
+serial_print("Initializing session subsystem\n");
+Session::init();
+
+    // ------------------------------------------------
     // IPC
     // ------------------------------------------------
 
@@ -459,15 +478,75 @@ if (documentsDir >= 0) {
         Keyboard::getchar();
     }
 
-   // ------------------------------------------------
-// Start NovaOS desktop
+// ------------------------------------------------
+// NovaOS Account Setup / Login
 // ------------------------------------------------
 
-if (got_vesa) {
-    serial_print("Starting NovaOS desktop UI\n");
+if (User::count() == 0) {
 
-    Desktop::init();
-    Desktop::run();
+    // --------------------------------------------
+    // First boot — no user accounts exist
+    // --------------------------------------------
+
+    serial_print(
+        "No users found - starting first boot setup\n"
+    );
+
+    SetupPage::init();
+
+    if (!SetupPage::run()) {
+        serial_print(
+            "ERROR: Setup exited unexpectedly\n"
+        );
+
+        for (;;) {
+            asm volatile("hlt");
+        }
+    }
+
+    serial_print(
+        "First user account created and logged in\n"
+    );
+
+} else {
+
+    // --------------------------------------------
+    // Returning user — show login screen
+    // --------------------------------------------
+
+    serial_print("Starting login screen\n");
+
+    LoginPage::init();
+
+    if (!LoginPage::run()) {
+        serial_print(
+            "ERROR: Login screen exited unexpectedly\n"
+        );
+
+        for (;;) {
+            asm volatile("hlt");
+        }
+    }
+
+    serial_print("Login successful\n");
+}
+
+
+// ------------------------------------------------
+// NovaOS Desktop
+// ------------------------------------------------
+
+serial_print("Starting desktop\n");
+
+Desktop::init();
+Desktop::run();
+
+
+// We should never normally reach this point.
+serial_print("ERROR: Desktop exited unexpectedly\n");
+
+for (;;) {
+    asm volatile("hlt");
 }
 
 // ------------------------------------------------

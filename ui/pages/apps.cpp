@@ -2,6 +2,7 @@
 
 #include "../theme/colors.h"
 #include "../../kernel/drivers/video/framebuffer.h"
+#include "../../kernel/drivers/video/font_renderer.h"
 
 namespace {
 
@@ -20,17 +21,21 @@ namespace {
             NovaColors::SurfaceRaised
         );
 
-        Framebuffer::print_at(
+        // App title — Inter 16px
+        FontRenderer::draw_text(
             title,
             x + 16,
-            y + 18,
+            y + 16,
+            16,
             NovaColors::TextPrimary
         );
 
-        Framebuffer::print_at(
+        // App description — Inter 14px
+        FontRenderer::draw_text(
             subtitle,
             x + 16,
-            y + 52,
+            y + 50,
+            14,
             NovaColors::TextSecondary
         );
     }
@@ -38,17 +43,22 @@ namespace {
 }
 
 void AppsPage::draw() {
-    Framebuffer::print_at(
+
+    // Page title — Inter 24px
+    FontRenderer::draw_text(
         "Apps",
         190,
-        72,
+        70,
+        24,
         NovaColors::TextPrimary
     );
 
-    Framebuffer::print_at(
+    // Page description — Inter 14px
+    FontRenderer::draw_text(
         "Your NovaOS applications",
         190,
-        98,
+        103,
+        14,
         NovaColors::TextSecondary
     );
 
